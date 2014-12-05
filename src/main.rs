@@ -10,7 +10,7 @@ extern crate render;
 
 use gfx::{Device, DeviceHelper, ToSlice};
 use glfw::Context;
-use cgmath::{Matrix4, FixedArray};
+use cgmath::{Matrix, FixedArray};
 use std::vec::Vec;
 use std::iter::IteratorExt;
 
@@ -140,9 +140,15 @@ fn main() {
 
     let aspect_ratio = width as f32 / height as f32;
     let view_angle = cgmath::deg(45.0f32);
+    let view: cgmath::AffineMatrix3<f32> = cgmath::Transform::look_at(
+        &cgmath::Point3::new(1.5f32, -5.0, 3.0),
+        &cgmath::Point3::new(0f32, 0.0, 0.0),
+        &cgmath::Vector3::unit_z()
+    );
+    let proj_perspective = cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0);
     let data = Params {
-        world_mat: Matrix4::identity().as_fixed().clone(),
-        view_proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).as_fixed().clone()
+        world_mat: cgmath::Matrix4::identity().as_fixed().clone(),
+        view_proj_mat: proj_perspective.mul_m(&view.mat).into_fixed()
     };
 
     while !wnd.should_close() {
