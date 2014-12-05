@@ -129,16 +129,6 @@ bitflags! {
     }
 }
 
-impl CameraRotationFlags {
-    pub fn set(&mut self, flag: CameraRotationFlags, value: bool) {
-        if value {
-            self.insert(flag)
-        } else {
-            self.remove(flag)
-        }
-    }
-}
-
 struct Camera {
     angle_xz: f32,
     angle_y: f32,
@@ -160,12 +150,10 @@ impl Camera {
 
         let (sin_xz, cos_xz) = self.angle_xz.sin_cos();
         let (sin_y, cos_y) = self.angle_y.sin_cos();
-        println!("sincos: {}/{}, {}/{}", sin_xz, cos_xz, sin_y, cos_y);
 
         let x = RADIUS * cos_xz * cos_y;
         let y = RADIUS * sin_y;
         let z = RADIUS * sin_xz * cos_y;
-        println!("{}/{}/{}", x, y, z);
 
         cgmath::Matrix4::look_at(&cgmath::Point3::new(x, y, z),
                                  &cgmath::Point3::new(0.0, 0.0, 0.0),
@@ -173,6 +161,8 @@ impl Camera {
     }
 
     pub fn update(&mut self, dt: f32) {
+        const EPSILON: f32 = 0.00001;
+
         let left = self.rotate.contains(CAMERA_LEFT);
         let right = self.rotate.contains(CAMERA_RIGHT);
         let up = self.rotate.contains(CAMERA_UP);
@@ -180,12 +170,20 @@ impl Camera {
 
         let dir_xz = right as f32 - left as f32;
         let dir_y = down as f32 - up as f32;
-        println!("dir_xz = {}, dir_y = {}", dir_xz, dir_y);
 
         self.angle_xz = (self.angle_xz + dt * dir_xz) % f32::consts::PI_2;
-        self.angle_y = (self.angle_y + dt * dir_y).min(f32::consts::FRAC_PI_2)
-                                                  .max(-f32::consts::FRAC_PI_2);
-        println!("xz = {}, y = {}", self.angle_xz, self.angle_y);
+        self.angle_y = (self.angle_y + dt * dir_y).min(f32::consts::FRAC_PI_2 - EPSILON)
+                                                  .max(-f32::consts::FRAC_PI_2 + EPSILON);
+    }
+
+    pub fn handle_key_action(&mut self,
+                             dir: CameraRotationFlags,
+                             action: glfw::Action) {
+        match action {
+            glfw::Action::Press => self.rotate.insert(dir),
+            glfw::Action::Release => self.rotate.remove(dir),
+            _ => {}
+        }
     }
 }
 
@@ -230,13 +228,13 @@ impl<'a> GameState<'a> {
                 glfw::Key::Escape =>
                     self.wnd.set_should_close(true),
                 glfw::Key::A =>
-                    self.camera.rotate.set(CAMERA_LEFT, action == glfw::Action::Press),
+                    self.camera.handle_key_action(CAMERA_LEFT, action),
                 glfw::Key::D =>
-                    self.camera.rotate.set(CAMERA_RIGHT, action == glfw::Action::Press),
+                    self.camera.handle_key_action(CAMERA_RIGHT, action),
                 glfw::Key::W =>
-                    self.camera.rotate.set(CAMERA_UP, action == glfw::Action::Press),
+                    self.camera.handle_key_action(CAMERA_UP, action),
                 glfw::Key::S =>
-                    self.camera.rotate.set(CAMERA_DOWN, action == glfw::Action::Press),
+                    self.camera.handle_key_action(CAMERA_DOWN, action),
                 _ => {}
             },
             _ => {}
