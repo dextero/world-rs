@@ -1,5 +1,6 @@
 #![feature(phase)]
 
+extern crate time;
 extern crate glfw;
 extern crate gfx;
 extern crate cgmath;
@@ -8,6 +9,7 @@ extern crate cgmath;
 extern crate gfx_macros;
 extern crate render;
 extern crate device;
+extern crate core;
 
 use gfx::{Device, DeviceHelper, ToSlice};
 use gfx::GlCommandBuffer;
@@ -15,6 +17,8 @@ use glfw::Context;
 use cgmath::FixedArray;
 use std::vec::Vec;
 use std::iter::IteratorExt;
+use std::num::FloatMath;
+use core::f32;
 
 mod polyhedron;
 
@@ -115,12 +119,73 @@ fn polyhedron_to_batch(poly: &polyhedron::Polyhedron,
     ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
 }
 
-fn handle_event(evt: &glfw::WindowEvent,
-                game: &mut GameState) {
-    match *evt {
-        glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) =>
-            game.wnd.set_should_close(true),
-        _ => {}
+bitflags! {
+    flags CameraRotationFlags: u32 {
+        const CAMERA_STILL = 0x0,
+        const CAMERA_UP    = 0x1,
+        const CAMERA_DOWN  = 0x2,
+        const CAMERA_LEFT  = 0x4,
+        const CAMERA_RIGHT = 0x8
+    }
+}
+
+impl CameraRotationFlags {
+    pub fn set(&mut self, flag: CameraRotationFlags, value: bool) {
+        if value {
+            self.insert(flag)
+        } else {
+            self.remove(flag)
+        }
+    }
+}
+
+struct Camera {
+    angle_xz: f32,
+    angle_y: f32,
+
+    rotate: CameraRotationFlags
+}
+
+impl Camera {
+    fn new() -> Camera {
+        Camera {
+            angle_xz: 0.0,
+            angle_y: 0.0,
+            rotate: CAMERA_STILL
+        }
+    }
+
+    pub fn to_view_matrix(&mut self) -> cgmath::Matrix4<f32> {
+        const RADIUS: f32 = 5.0;
+
+        let (sin_xz, cos_xz) = self.angle_xz.sin_cos();
+        let (sin_y, cos_y) = self.angle_y.sin_cos();
+        println!("sincos: {}/{}, {}/{}", sin_xz, cos_xz, sin_y, cos_y);
+
+        let x = RADIUS * cos_xz * cos_y;
+        let y = RADIUS * sin_y;
+        let z = RADIUS * sin_xz * cos_y;
+        println!("{}/{}/{}", x, y, z);
+
+        cgmath::Matrix4::look_at(&cgmath::Point3::new(x, y, z),
+                                 &cgmath::Point3::new(0.0, 0.0, 0.0),
+                                 &cgmath::Vector3::unit_y())
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        let left = self.rotate.contains(CAMERA_LEFT);
+        let right = self.rotate.contains(CAMERA_RIGHT);
+        let up = self.rotate.contains(CAMERA_UP);
+        let down = self.rotate.contains(CAMERA_DOWN);
+
+        let dir_xz = right as f32 - left as f32;
+        let dir_y = down as f32 - up as f32;
+        println!("dir_xz = {}, dir_y = {}", dir_xz, dir_y);
+
+        self.angle_xz = (self.angle_xz + dt * dir_xz) % f32::consts::PI_2;
+        self.angle_y = (self.angle_y + dt * dir_y).min(f32::consts::FRAC_PI_2)
+                                                  .max(-f32::consts::FRAC_PI_2);
+        println!("xz = {}, y = {}", self.angle_xz, self.angle_y);
     }
 }
 
@@ -128,7 +193,8 @@ struct GameState<'a> {
     wnd: &'a glfw::Window,
     dev: gfx::GlDevice,
     renderer: render::Renderer<gfx::GlCommandBuffer>,
-    uniforms: Uniforms
+    uniforms: Uniforms,
+    camera: Camera
 }
 
 impl<'a> GameState<'a> {
@@ -153,8 +219,33 @@ impl<'a> GameState<'a> {
                 world_mat: cgmath::Matrix4::identity().into_fixed(),
                 view_mat: view.mat.into_fixed(),
                 proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).into_fixed()
-            }
+            },
+            camera: Camera::new()
         }
+    }
+
+    pub fn handle_event(&mut self, evt: &glfw::WindowEvent) {
+        match *evt {
+            glfw::WindowEvent::Key(key, _, action, _) => match key {
+                glfw::Key::Escape =>
+                    self.wnd.set_should_close(true),
+                glfw::Key::A =>
+                    self.camera.rotate.set(CAMERA_LEFT, action == glfw::Action::Press),
+                glfw::Key::D =>
+                    self.camera.rotate.set(CAMERA_RIGHT, action == glfw::Action::Press),
+                glfw::Key::W =>
+                    self.camera.rotate.set(CAMERA_UP, action == glfw::Action::Press),
+                glfw::Key::S =>
+                    self.camera.rotate.set(CAMERA_DOWN, action == glfw::Action::Press),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        self.camera.update(dt);
+        self.uniforms.view_mat = self.camera.to_view_matrix().into_fixed();
     }
 }
 
@@ -173,11 +264,18 @@ fn game_loop<'a>(game: &mut GameState<'a>,
         stencil: 0
     };
 
+    let mut frame_start = time::now().to_timespec();
+
     while !game.wnd.should_close() {
         glfw.poll_events();
         for (_, evt) in glfw::flush_messages(events) {
-            handle_event(&evt, game);
+            game.handle_event(&evt);
         }
+
+        let frame_end = time::now().to_timespec();
+        let delta_time = (frame_end - frame_start).num_milliseconds() as f32 / 1000.0;
+        game.update(delta_time);
+        frame_start = frame_end;
 
         game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
         game.renderer.draw((&batch, &game.uniforms, &ctx), frame);
