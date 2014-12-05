@@ -3,3 +3,12 @@
 name = "world"
 version = "0.0.1"
 authors = ["dextero <hukutizuviki+git@gmail.com>"]
+
+[dependencies.gfx]
+git = "https://github.com/gfx-rs/gfx-rs"
+
+[dependencies.glfw]
+git = "https://github.com/bjz/glfw-rs"
+
+[dependencies.cgmath]
+git = "https://github.com/bjz/cgmath-rs"

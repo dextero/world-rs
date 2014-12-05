@@ -1,107 +1,165 @@
-#![feature(globs)]
+#![feature(phase)]
+
+extern crate glfw;
+extern crate gfx;
+extern crate cgmath;
+
+#[phase(plugin)]
+extern crate gfx_macros;
+extern crate render;
+
+use gfx::{Device, DeviceHelper, ToSlice};
+use glfw::Context;
+use cgmath::{Matrix4, FixedArray};
+use std::vec::Vec;
+use std::iter::IteratorExt;
 
 mod polyhedron;
 
-mod mesh {
-    use std::vec::Vec;
-    use std::num::Float;
-    use polyhedron::*;
+#[vertex_format]
+struct Vertex {
+    #[name = "a_pos"]
+    pos: [f32, ..3],
 
-    struct Polyhedron {
-        pub vertices: Vec<Vertex>,
-        pub edges: Vec<Edge>,
-        pub faces: Vec<Face>
-    }
+    #[name = "a_color"]
+    color: [f32, ..4]
+}
 
-    impl Polyhedron {
-        fn new() -> Polyhedron {
-            Polyhedron {
-                vertices: Vec::new(),
-                edges: Vec::new(),
-                faces: Vec::new()
-            }
+#[shader_param(PolyhedronBatch)]
+struct Params {
+    #[name = "u_world"]
+    world_mat: [[f32, ..4], ..4],
+
+    #[name = "u_view_proj"]
+    view_proj_mat: [[f32, ..4], ..4]
+}
+
+static VS_SOURCE: gfx::ShaderSource<'static> = shaders! {
+GLSL_150: b"
+#version 150 core
+
+in vec3 a_pos;
+in vec4 a_color;
+
+out vec4 v_color;
+
+uniform mat4 u_world;
+uniform mat4 u_view_proj;
+
+void main() {
+    gl_Position = u_view_proj * u_world * vec4(a_pos, 1.0);
+    v_color = a_color;
+}
+"
+};
+
+static FS_SOURCE: gfx::ShaderSource<'static> = shaders! {
+GLSL_150: b"
+#version 150 core
+
+in vec4 v_color;
+
+out vec4 out_color;
+
+void main() {
+    out_color = v_color;
+}
+"
+};
+
+fn random_grey() -> [f32, ..4] {
+    let brightness = std::rand::random::<f32>();
+    [brightness, brightness, brightness, 1.0f32]
+}
+
+fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
+    let mut vertices = Vec::new();
+    vertices.reserve(poly.faces.len() * 3u);
+
+    for &face in poly.faces.iter() {
+        let face_col = random_grey();
+
+        for i in range(0u, 3u) {
+            let pos = &poly.vertices[face.vertex_indices[i]].pos;
+
+            vertices.push(Vertex {
+                pos: *pos,
+                color: face_col
+            });
         }
     }
 
-    fn make_icosahedron() -> Polyhedron {
-        let phi = (1.0 + 5.0f32.sqrt()) / 2.0;
-        let du = 1.0 / (phi * phi + 1.0).sqrt();
-        let dv = phi * du;
+    vertices
+}
 
-        let mut ret = Polyhedron::new();
+fn polyhedron_to_batch(poly: &polyhedron::Polyhedron,
+                       ctx: &mut gfx::batch::Context,
+                       dev: &mut gfx::GlDevice) -> PolyhedronBatch {
+    let vertices = polyhedron_to_vertices(poly);
+    let mesh = dev.create_mesh(vertices.as_slice());
 
-        ret.vertices.push_all(&[
-            vertex(0.0,  dv,  du),
-            vertex(0.0,  dv, -du),
-            vertex(0.0, -dv,  du),
-            vertex(0.0, -dv, -du),
-            vertex( du, 0.0,  dv),
-            vertex(-du, 0.0,  dv),
-            vertex( du, 0.0, -dv),
-            vertex(-du, 0.0, -dv),
-            vertex( dv,  du, 0.0),
-            vertex( dv, -du, 0.0),
-            vertex(-dv,  du, 0.0),
-            vertex(-dv, -du, 0.0)
-        ]);
-        ret.edges.push_all(&[
-            edge( 0,  1), edge( 0,  4), edge( 0,  5), edge( 0,  8), edge( 0, 10),
-            edge( 1,  6), edge( 1,  7), edge( 1,  8), edge( 1, 10), edge( 2,  3),
-            edge( 2,  4), edge( 2,  5), edge( 2,  9), edge( 2, 11), edge( 3,  6),
-            edge( 3,  7), edge( 3,  9), edge( 3, 11), edge( 4,  5), edge( 4,  8),
-            edge( 4,  9), edge( 5, 10), edge( 5, 11), edge( 6,  7), edge( 6,  8),
-            edge( 6,  9), edge( 7, 10), edge( 7, 11), edge( 8,  9), edge(10, 11)
-        ]);
-        ret.faces.push_all(&[
-            face(0,  1,  8,  0,  7,  3),
-            face(0,  4,  5,  1, 18,  2),
-            face(0,  5, 10,  2, 21,  4),
-            face(0,  8,  4,  3, 19,  1),
-            face(0, 10,  1,  4,  8,  0),
-            face(1,  6,  8,  5, 24,  7),
-            face(1,  7,  6,  6, 23,  5),
-            face(1, 10,  7,  8, 26,  6),
-            face(2,  3, 11,  9, 17, 13),
-            face(2,  4,  9, 10, 20, 12),
-            face(2,  5,  4, 11, 18, 10),
-            face(2,  9,  3, 12, 16,  9),
-            face(2, 11,  5, 13, 22, 11),
-            face(3,  6,  7, 14, 23, 15),
-            face(3,  7, 11, 15, 27, 17),
-            face(3,  9,  6, 16, 25, 14),
-            face(4,  8,  9, 19, 28, 20),
-            face(5, 11, 10, 22, 29, 21),
-            face(6,  9,  8, 25, 28, 24),
-            face(7, 10, 11, 26, 29, 27)
-        ]);
+    let indices = range(0u32, vertices.len() as u32).collect::<Vec<u32>>();
+    let idx_slice = dev.create_buffer_static(indices.as_slice())
+                       .to_slice(gfx::PrimitiveType::TriangleList);
 
-        for i in range(0, ret.edges.len()) {
-            for &vert_idx in ret.edges[i].vertex_indices.iter() {
-                ret.vertices[vert_idx].edge_indices.push(i);
-            }
-        }
+    let shader = dev.link_program(VS_SOURCE.clone(), FS_SOURCE.clone())
+                    .unwrap();
+    let state = gfx::DrawState::new().depth(gfx::state::Comparison::LessEqual, true);
 
-        for i in range(0, ret.faces.len()) {
-            for &vert_idx in ret.faces[i].vertex_indices.iter() {
-                ret.vertices[vert_idx].face_indices.push(i);
-            }
-            for &edge_idx in ret.faces[i].edge_indices.iter() {
-                ret.edges[edge_idx].face_indices.push(i);
-            }
-        }
-
-        ret
-    }
-
-    pub fn make_sphere() -> Polyhedron {
-        make_icosahedron()
-    }
+    ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
 }
 
 fn main() {
-    let sphere = mesh::make_sphere();
+    let glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
+    glfw.set_error_callback(glfw::FAIL_ON_ERRORS);
 
-    for v in sphere.vertices.iter() {
-        println!("{}\t{}\t{}", v.pos.x, v.pos.y, v.pos.z);
+    glfw.window_hint(glfw::WindowHint::ContextVersion(3, 3));
+    glfw.window_hint(glfw::WindowHint::OpenglForwardCompat(true));
+    glfw.window_hint(glfw::WindowHint::OpenglProfile(glfw::OpenGlProfileHint::Core));
+
+    let (wnd, events) = glfw.create_window(800, 600, "world", glfw::WindowMode::Windowed)
+                            .expect("Failed to create GLFW window");
+    wnd.make_current();
+    wnd.set_key_polling(true);
+
+    let (width, height) = wnd.get_framebuffer_size();
+    let frame = gfx::Frame::new(width as u16, height as u16);
+
+    let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
+    let mut renderer = dev.create_renderer();
+    let mut ctx = gfx::batch::Context::new();
+
+    let sphere = polyhedron::make_sphere();
+    let batch = polyhedron_to_batch(&sphere, &mut ctx, &mut dev);
+
+    let clear_data = gfx::ClearData {
+        color: [0.0, 0.0, 0.2, 1.0],
+        depth: 1.0,
+        stencil: 0
+    };
+
+    let aspect_ratio = width as f32 / height as f32;
+    let view_angle = cgmath::deg(45.0f32);
+    let data = Params {
+        world_mat: Matrix4::identity().as_fixed().clone(),
+        view_proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).as_fixed().clone()
+    };
+
+    while !wnd.should_close() {
+        glfw.poll_events();
+        for (_, evt) in glfw::flush_messages(&events) {
+            match evt {
+                glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) =>
+                    wnd.set_should_close(true),
+                _ => {}
+            }
+        }
+
+        renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, &frame);
+        renderer.draw((&batch, &data, &ctx), &frame);
+        dev.submit(renderer.as_buffer());
+        renderer.reset();
+
+        wnd.swap_buffers();
     }
 }
