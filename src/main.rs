@@ -7,10 +7,12 @@ extern crate cgmath;
 #[phase(plugin)]
 extern crate gfx_macros;
 extern crate render;
+extern crate device;
 
 use gfx::{Device, DeviceHelper, ToSlice};
+use gfx::GlCommandBuffer;
 use glfw::Context;
-use cgmath::{Matrix, FixedArray};
+use cgmath::FixedArray;
 use std::vec::Vec;
 use std::iter::IteratorExt;
 
@@ -26,12 +28,15 @@ struct Vertex {
 }
 
 #[shader_param(PolyhedronBatch)]
-struct Params {
+struct Uniforms {
     #[name = "u_world"]
     world_mat: [[f32, ..4], ..4],
 
-    #[name = "u_view_proj"]
-    view_proj_mat: [[f32, ..4], ..4]
+    #[name = "u_view"]
+    view_mat: [[f32, ..4], ..4],
+
+    #[name = "u_proj"]
+    proj_mat: [[f32, ..4], ..4]
 }
 
 static VS_SOURCE: gfx::ShaderSource<'static> = shaders! {
@@ -44,10 +49,11 @@ in vec4 a_color;
 out vec4 v_color;
 
 uniform mat4 u_world;
-uniform mat4 u_view_proj;
+uniform mat4 u_view;
+uniform mat4 u_proj;
 
 void main() {
-    gl_Position = u_view_proj * u_world * vec4(a_pos, 1.0);
+    gl_Position = u_proj * u_view * u_world * vec4(a_pos, 1.0);
     v_color = a_color;
 }
 "
@@ -109,6 +115,79 @@ fn polyhedron_to_batch(poly: &polyhedron::Polyhedron,
     ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
 }
 
+fn handle_event(evt: &glfw::WindowEvent,
+                game: &mut GameState) {
+    match *evt {
+        glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) =>
+            game.wnd.set_should_close(true),
+        _ => {}
+    }
+}
+
+struct GameState<'a> {
+    wnd: &'a glfw::Window,
+    dev: gfx::GlDevice,
+    renderer: render::Renderer<gfx::GlCommandBuffer>,
+    uniforms: Uniforms
+}
+
+impl<'a> GameState<'a> {
+    fn new(wnd: &glfw::Window) -> GameState {
+        let (width, height) = wnd.get_size();
+        let aspect_ratio = width as f32 / height as f32;
+        let view_angle = cgmath::deg(45.0f32);
+        let view: cgmath::AffineMatrix3<f32> = cgmath::Transform::look_at(
+            &cgmath::Point3::new(-5.0f32, -5.0, 0.0),
+            &cgmath::Point3::new(0.0f32, 0.0, 0.0),
+            &cgmath::Vector3::unit_z()
+        );
+
+        let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
+        let renderer = dev.create_renderer();
+
+        GameState {
+            wnd: wnd,
+            dev: dev,
+            renderer: renderer,
+            uniforms: Uniforms {
+                world_mat: cgmath::Matrix4::identity().into_fixed(),
+                view_mat: view.mat.into_fixed(),
+                proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).into_fixed()
+            }
+        }
+    }
+}
+
+fn game_loop<'a>(game: &mut GameState<'a>,
+                 glfw: &glfw::Glfw,
+                 events: &std::comm::Receiver<(f64, glfw::WindowEvent)>,
+                 frame: &gfx::Frame) {
+    let mut ctx = gfx::batch::Context::new();
+
+    let sphere = polyhedron::make_sphere();
+    let batch = polyhedron_to_batch(&sphere, &mut ctx, &mut game.dev);
+
+    let clear_data = gfx::ClearData {
+        color: [0.0, 0.0, 0.2, 1.0],
+        depth: 1.0,
+        stencil: 0
+    };
+
+    while !game.wnd.should_close() {
+        glfw.poll_events();
+        for (_, evt) in glfw::flush_messages(events) {
+            handle_event(&evt, game);
+        }
+
+        game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
+        game.renderer.draw((&batch, &game.uniforms, &ctx), frame);
+        game.dev.submit(game.renderer.as_buffer());
+        game.renderer.reset();
+
+        game.wnd.swap_buffers();
+    }
+}
+
 fn main() {
     let glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.set_error_callback(glfw::FAIL_ON_ERRORS);
@@ -125,47 +204,6 @@ fn main() {
     let (width, height) = wnd.get_framebuffer_size();
     let frame = gfx::Frame::new(width as u16, height as u16);
 
-    let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
-    let mut renderer = dev.create_renderer();
-    let mut ctx = gfx::batch::Context::new();
-
-    let sphere = polyhedron::make_sphere();
-    let batch = polyhedron_to_batch(&sphere, &mut ctx, &mut dev);
-
-    let clear_data = gfx::ClearData {
-        color: [0.0, 0.0, 0.2, 1.0],
-        depth: 1.0,
-        stencil: 0
-    };
-
-    let aspect_ratio = width as f32 / height as f32;
-    let view_angle = cgmath::deg(45.0f32);
-    let view: cgmath::AffineMatrix3<f32> = cgmath::Transform::look_at(
-        &cgmath::Point3::new(1.5f32, -5.0, 3.0),
-        &cgmath::Point3::new(0f32, 0.0, 0.0),
-        &cgmath::Vector3::unit_z()
-    );
-    let proj_perspective = cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0);
-    let data = Params {
-        world_mat: cgmath::Matrix4::identity().as_fixed().clone(),
-        view_proj_mat: proj_perspective.mul_m(&view.mat).into_fixed()
-    };
-
-    while !wnd.should_close() {
-        glfw.poll_events();
-        for (_, evt) in glfw::flush_messages(&events) {
-            match evt {
-                glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) =>
-                    wnd.set_should_close(true),
-                _ => {}
-            }
-        }
-
-        renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, &frame);
-        renderer.draw((&batch, &data, &ctx), &frame);
-        dev.submit(renderer.as_buffer());
-        renderer.reset();
-
-        wnd.swap_buffers();
-    }
+    let mut state = GameState::new(&wnd);
+    game_loop(&mut state, &glfw, &events, &frame);
 }
