@@ -93,7 +93,7 @@ fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
             let pos = &poly.vertices[face.vertex_indices[i]].pos;
 
             vertices.push(Vertex {
-                pos: *pos,
+                pos: *pos.as_fixed(),
                 color: face_col
             });
         }
