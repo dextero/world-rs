@@ -3,6 +3,8 @@ extern crate cgmath;
 use std::vec::Vec;
 use std::clone::Clone;
 use std::num::Float;
+use std::cmp::Eq;
+use std::collections::TreeMap;
 use cgmath::EuclideanVector;
 
 pub struct PolyVertex {
@@ -12,12 +14,20 @@ pub struct PolyVertex {
 }
 
 impl PolyVertex {
-    fn new(x: f32, y: f32, z: f32) -> PolyVertex {
+    fn from_vec(pos: &cgmath::Vector3<f32>) -> PolyVertex {
         PolyVertex {
-            pos: cgmath::Vector3::new(x, y, z),
+            pos: *pos,
             edge_indices: Vec::new(),
             face_indices: Vec::new()
         }
+    }
+
+    fn from_xyz(x: f32, y: f32, z: f32) -> PolyVertex {
+        PolyVertex::from_vec(&cgmath::Vector3::new(x, y, z))
+    }
+
+    fn new() -> PolyVertex {
+        PolyVertex::from_xyz(0.0, 0.0, 0.0)
     }
 }
 
@@ -102,18 +112,18 @@ fn make_icosahedron() -> Polyhedron {
     let mut ret = Polyhedron::new();
 
     ret.vertices.push_all(&[
-        PolyVertex::new(0.0,  dv,  du),
-        PolyVertex::new(0.0,  dv, -du),
-        PolyVertex::new(0.0, -dv,  du),
-        PolyVertex::new(0.0, -dv, -du),
-        PolyVertex::new( du, 0.0,  dv),
-        PolyVertex::new(-du, 0.0,  dv),
-        PolyVertex::new( du, 0.0, -dv),
-        PolyVertex::new(-du, 0.0, -dv),
-        PolyVertex::new( dv,  du, 0.0),
-        PolyVertex::new( dv, -du, 0.0),
-        PolyVertex::new(-dv,  du, 0.0),
-        PolyVertex::new(-dv, -du, 0.0)
+        PolyVertex::from_xyz(0.0,  dv,  du),
+        PolyVertex::from_xyz(0.0,  dv, -du),
+        PolyVertex::from_xyz(0.0, -dv,  du),
+        PolyVertex::from_xyz(0.0, -dv, -du),
+        PolyVertex::from_xyz( du, 0.0,  dv),
+        PolyVertex::from_xyz(-du, 0.0,  dv),
+        PolyVertex::from_xyz( du, 0.0, -dv),
+        PolyVertex::from_xyz(-du, 0.0, -dv),
+        PolyVertex::from_xyz( dv,  du, 0.0),
+        PolyVertex::from_xyz( dv, -du, 0.0),
+        PolyVertex::from_xyz(-dv,  du, 0.0),
+        PolyVertex::from_xyz(-dv, -du, 0.0)
     ]);
     ret.edges.push_all(&[
         Edge::new( 0,  1), Edge::new( 0,  4), Edge::new( 0,  5), Edge::new( 0,  8), Edge::new( 0, 10),
@@ -164,6 +174,138 @@ fn make_icosahedron() -> Polyhedron {
     ret
 }
 
-pub fn make_sphere() -> Polyhedron {
-    make_icosahedron()
+fn get_or_create<T: Ord>(map: &mut TreeMap<T, uint>,
+                         val: T) -> uint {
+    match map.get(&val) {
+        Some(&idx) => idx,
+        None => {
+            let new_idx = map.len();
+            map.insert(val, new_idx);
+            new_idx
+        }
+    }
+}
+
+struct VecWrapper {
+    vec: cgmath::Vector3<f32>
+}
+
+impl VecWrapper {
+    fn new(vec: &cgmath::Vector3<f32>) -> VecWrapper {
+        VecWrapper { vec: *vec }
+    }
+}
+
+fn almost_eq(a: f32, b: f32) -> bool {
+    const EPSILON: f32 = 0.00001;
+    (a - b).abs() < EPSILON
+}
+
+impl PartialEq for VecWrapper {
+    fn eq(&self, other: &VecWrapper) -> bool {
+        almost_eq(self.vec.x, other.vec.x)
+            && almost_eq(self.vec.y, other.vec.y)
+            && almost_eq(self.vec.z, other.vec.z)
+    }
+}
+impl Eq for VecWrapper {}
+
+impl PartialOrd for VecWrapper {
+    fn partial_cmp(&self, other: &VecWrapper) -> Option<Ordering> {
+        Some(if !almost_eq(self.vec.x, other.vec.x) {
+                 if self.vec.x < other.vec.x { Less } else { Greater }
+             } else if !almost_eq(self.vec.y, other.vec.y) {
+                 if self.vec.y < other.vec.y { Less } else { Greater }
+             } else if !almost_eq(self.vec.z, other.vec.z) {
+                 if self.vec.z < other.vec.z { Less } else { Greater }
+             } else {
+                 Equal
+             })
+    }
+}
+
+impl Ord for VecWrapper {
+    fn cmp(&self, other: &VecWrapper) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+fn refine(poly: &Polyhedron) -> Polyhedron {
+    let mut ret = Polyhedron::new();
+    let mut verts = TreeMap::new();
+    let mut edges = TreeMap::new();
+
+    for &face in poly.faces.iter() {
+        let v1 = &poly.vertices[face.vertex_indices[0]].pos;
+        let v2 = &poly.vertices[face.vertex_indices[1]].pos;
+        let v3 = &poly.vertices[face.vertex_indices[2]].pos;
+        let v12 = v1.add(v2).normalize();
+        let v23 = v2.add(v3).normalize();
+        let v31 = v3.add(v1).normalize();
+
+        let v1_idx = get_or_create(&mut verts, VecWrapper::new(v1));
+        let v2_idx = get_or_create(&mut verts, VecWrapper::new(v2));
+        let v3_idx = get_or_create(&mut verts, VecWrapper::new(v3));
+        let v12_idx = get_or_create(&mut verts, VecWrapper::new(&v12));
+        let v23_idx = get_or_create(&mut verts, VecWrapper::new(&v23));
+        let v31_idx = get_or_create(&mut verts, VecWrapper::new(&v31));
+
+        let e1_12 = if v1_idx < v12_idx { (v1_idx, v12_idx) } else { (v12_idx, v1_idx) };
+        let e12_2 = if v12_idx < v2_idx { (v12_idx, v2_idx) } else { (v2_idx, v12_idx) };
+        let e2_23 = if v2_idx < v23_idx { (v2_idx, v23_idx) } else { (v23_idx, v2_idx) };
+        let e23_3 = if v23_idx < v3_idx { (v23_idx, v3_idx) } else { (v3_idx, v23_idx) };
+        let e3_31 = if v3_idx < v31_idx { (v3_idx, v31_idx) } else { (v31_idx, v3_idx) };
+        let e31_1 = if v31_idx < v1_idx { (v31_idx, v1_idx) } else { (v1_idx, v31_idx) };
+
+        let e1_12_idx = get_or_create(&mut edges, e1_12);
+        let e12_2_idx = get_or_create(&mut edges, e12_2);
+        let e2_23_idx = get_or_create(&mut edges, e2_23);
+        let e23_3_idx = get_or_create(&mut edges, e23_3);
+        let e3_31_idx = get_or_create(&mut edges, e3_31);
+        let e31_1_idx = get_or_create(&mut edges, e31_1);
+        let e12_31_idx = get_or_create(&mut edges, (v12_idx, v31_idx));
+        let e12_23_idx = get_or_create(&mut edges, (v12_idx, v23_idx));
+        let e23_31_idx = get_or_create(&mut edges, (v23_idx, v31_idx));
+
+        ret.faces.push(Face::new(v1_idx, v12_idx, v31_idx, e1_12_idx, e12_31_idx, e31_1_idx));
+        ret.faces.push(Face::new(v12_idx, v2_idx, v23_idx, e12_2_idx, e2_23_idx, e12_23_idx));
+        ret.faces.push(Face::new(v23_idx, v3_idx, v31_idx, e23_3_idx, e3_31_idx, e23_31_idx));
+        ret.faces.push(Face::new(v12_idx, v23_idx, v31_idx, e12_23_idx, e23_31_idx, e12_31_idx));
+    }
+
+    ret.vertices.grow(verts.len(), PolyVertex::new());
+    for (vert, &idx) in verts.iter() {
+        ret.vertices[idx] = PolyVertex::from_vec(&vert.vec);
+    }
+
+    ret.edges.grow(edges.len(), Edge::new(-1, -1));
+    for (&(a, b), &idx) in edges.iter() {
+        ret.edges[idx] = Edge::new(a, b);
+    }
+
+    for i in range(0, ret.edges.len()) {
+        for &vert_idx in ret.edges[i].vertex_indices.iter() {
+            ret.vertices[vert_idx].edge_indices.push(i);
+        }
+    }
+
+    for i in range(0, ret.faces.len()) {
+        for &vert_idx in ret.faces[i].vertex_indices.iter() {
+            ret.vertices[vert_idx].face_indices.push(i);
+        }
+        for &edge_idx in ret.faces[i].edge_indices.iter() {
+            ret.edges[edge_idx].face_indices.push(i);
+        }
+    }
+
+    ret
+}
+
+pub fn make_sphere(detail_level: uint) -> Polyhedron {
+    let mut sphere = make_icosahedron();
+    for _ in range(0, detail_level) {
+        sphere = refine(&sphere);
+    }
+
+    sphere
 }

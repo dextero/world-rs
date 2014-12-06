@@ -77,9 +77,11 @@ void main() {
 "
 };
 
-fn random_grey() -> [f32, ..4] {
-    let brightness = std::rand::random::<f32>();
-    [brightness, brightness, brightness, 1.0f32]
+fn random_color() -> [f32, ..4] {
+    [std::rand::random::<f32>(),
+     std::rand::random::<f32>(),
+     std::rand::random::<f32>(),
+     1.0]
 }
 
 fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
@@ -87,7 +89,7 @@ fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
     vertices.reserve(poly.faces.len() * 3u);
 
     for &face in poly.faces.iter() {
-        let face_col = random_grey();
+        let face_col = random_color();
 
         for i in range(0u, 3u) {
             let pos = &poly.vertices[face.vertex_indices[i]].pos;
@@ -253,7 +255,7 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  frame: &gfx::Frame) {
     let mut ctx = gfx::batch::Context::new();
 
-    let sphere = polyhedron::make_sphere();
+    let sphere = polyhedron::make_sphere(3);
     let batch = polyhedron_to_batch(&sphere, &mut ctx, &mut game.dev);
 
     let clear_data = gfx::ClearData {
@@ -292,7 +294,7 @@ fn main() {
     glfw.window_hint(glfw::WindowHint::OpenglForwardCompat(true));
     glfw.window_hint(glfw::WindowHint::OpenglProfile(glfw::OpenGlProfileHint::Core));
 
-    let (wnd, events) = glfw.create_window(800, 600, "world", glfw::WindowMode::Windowed)
+    let (wnd, events) = glfw.create_window(1000, 1000, "world", glfw::WindowMode::Windowed)
                             .expect("Failed to create GLFW window");
     wnd.make_current();
     wnd.set_key_polling(true);
