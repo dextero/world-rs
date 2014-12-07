@@ -19,6 +19,8 @@ use cgmath::{Vector, Point, Point3, Vector3, Matrix4, FixedArray, AffineMatrix3,
 use std::vec::Vec;
 use std::iter::IteratorExt;
 use polyhedron::Polyhedron;
+use core::f32::consts::{PI, FRAC_PI_3};
+use std::num::{Float, FloatMath};
 
 mod polyhedron;
 mod camera;
@@ -28,7 +30,7 @@ macro_rules! time_it(
         let __start_time = time::precise_time_s();
         let __ret = $expr;
         let __end_time = time::precise_time_s();
-        println!("{}: {}s", $name, __end_time - __start_time);
+        //println!("{}: {}s", $name, __end_time - __start_time);
         __ret
     });
 )
@@ -100,10 +102,28 @@ void main() {
 "
 };
 
-fn random_color() -> [f32, ..4] {
-    [std::rand::random::<f32>(),
-     std::rand::random::<f32>(),
-     std::rand::random::<f32>(),
+fn color_for_y(col: f32, y: f32) -> f32 {
+    (y.abs() * 0.8 + col).min(1.0)
+}
+
+fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
+    let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
+    let c = 0.5;
+    let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
+    println!("hue: {}, x: {}", hue, x);
+
+    let rgb = match hue {
+        0.0 ... 1.0  => [c, x, 0.0],
+        1.0 ... 2.0 => [x, c, 0.0],
+        2.0 ... 3.0 => [0.0, c, x],
+        3.0 ... 4.0 => [0.0, x, c],
+        4.0 ... 5.0 => [x, 0.0, c],
+        _                 => [c, 0.0, x]
+    };
+
+    [color_for_y(rgb[0], pos.y),
+     color_for_y(rgb[1], pos.y),
+     color_for_y(rgb[2], pos.y),
      1.0]
 }
 
@@ -113,13 +133,16 @@ fn polyhedron_to_vertices(poly: &Polyhedron) -> Vec<Vertex> {
 
     for face_idx in range(0u, poly.faces.len()) {
         let face = &poly.faces[face_idx];
-        let face_col = random_color();
+        let verts = [&poly.vertices[face.vertex_indices[0]].pos,
+                     &poly.vertices[face.vertex_indices[1]].pos,
+                     &poly.vertices[face.vertex_indices[2]].pos];
 
-        for i in range(0u, 3u) {
-            let pos = &poly.vertices[face.vertex_indices[i]].pos;
+        let mean_pos = verts[0].add(verts[1]).add(verts[2]).div_s(3.0);
+        let face_col = color_for_pos(&mean_pos);
 
+        for &v in verts.iter() {
             vertices.push(Vertex {
-                pos: *pos.as_fixed(),
+                pos: *v.as_fixed(),
                 color: face_col,
                 id: face_idx as i32
             });
@@ -239,6 +262,7 @@ fn intersecting_triangle_id(poly: &Polyhedron,
         match dist {
             Some(dist) => match nearest {
                 Some((_, old_dist)) => {
+                    //println!("intersection with {}", i);
                     if old_dist > dist {
                         nearest = Some((i, dist))
                     }
@@ -322,7 +346,7 @@ impl<'a> GameState<'a> {
 
         let ray = Ray::towards_center(&self.camera.get_eye());
         let selected_id = intersecting_triangle_id(&self.poly, &ray);
-        println!("highlight: {}", selected_id);
+        //println!("highlight: {}", selected_id);
 
         self.uniforms.highlighted_id = match selected_id {
             Some(id) => id as i32,
