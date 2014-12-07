@@ -1,4 +1,5 @@
 #![feature(phase)]
+#![feature(macro_rules)]
 
 extern crate time;
 extern crate glfw;
@@ -14,13 +15,23 @@ extern crate core;
 use gfx::{Device, DeviceHelper, ToSlice};
 use gfx::GlCommandBuffer;
 use glfw::Context;
-use cgmath::FixedArray;
+use cgmath::{Vector, Point, Point3, Vector3, Matrix4, FixedArray, AffineMatrix3, Transform, EuclideanVector};
 use std::vec::Vec;
 use std::iter::IteratorExt;
-use std::num::FloatMath;
-use core::f32;
+use polyhedron::Polyhedron;
 
 mod polyhedron;
+mod camera;
+
+macro_rules! time_it(
+    ($name:expr, $expr:block) => ({
+        let __start_time = time::precise_time_s();
+        let __ret = $expr;
+        let __end_time = time::precise_time_s();
+        println!("{}: {}s", $name, __end_time - __start_time);
+        __ret
+    });
+)
 
 #[vertex_format]
 struct Vertex {
@@ -28,7 +39,10 @@ struct Vertex {
     pos: [f32, ..3],
 
     #[name = "a_color"]
-    color: [f32, ..4]
+    color: [f32, ..4],
+
+    #[name = "a_id"]
+    id: i32
 }
 
 #[shader_param(PolyhedronBatch)]
@@ -40,7 +54,10 @@ struct Uniforms {
     view_mat: [[f32, ..4], ..4],
 
     #[name = "u_proj"]
-    proj_mat: [[f32, ..4], ..4]
+    proj_mat: [[f32, ..4], ..4],
+
+    #[name = "u_highlighted_id"]
+    highlighted_id: i32
 }
 
 static VS_SOURCE: gfx::ShaderSource<'static> = shaders! {
@@ -49,16 +66,22 @@ GLSL_150: b"
 
 in vec3 a_pos;
 in vec4 a_color;
+in int a_id;
 
 out vec4 v_color;
 
 uniform mat4 u_world;
 uniform mat4 u_view;
 uniform mat4 u_proj;
+uniform int u_highlighted_id;
 
 void main() {
     gl_Position = u_proj * u_view * u_world * vec4(a_pos, 1.0);
-    v_color = a_color;
+    if (a_id == u_highlighted_id) {
+        v_color = vec4(1.0, 1.0, 1.0, 1.0);
+    } else {
+        v_color = a_color;
+    }
 }
 "
 };
@@ -84,11 +107,12 @@ fn random_color() -> [f32, ..4] {
      1.0]
 }
 
-fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
+fn polyhedron_to_vertices(poly: &Polyhedron) -> Vec<Vertex> {
     let mut vertices = Vec::new();
     vertices.reserve(poly.faces.len() * 3u);
 
-    for &face in poly.faces.iter() {
+    for face_idx in range(0u, poly.faces.len()) {
+        let face = &poly.faces[face_idx];
         let face_col = random_color();
 
         for i in range(0u, 3u) {
@@ -96,7 +120,8 @@ fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
 
             vertices.push(Vertex {
                 pos: *pos.as_fixed(),
-                color: face_col
+                color: face_col,
+                id: face_idx as i32
             });
         }
     }
@@ -104,7 +129,7 @@ fn polyhedron_to_vertices(poly: &polyhedron::Polyhedron) -> Vec<Vertex> {
     vertices
 }
 
-fn polyhedron_to_batch(poly: &polyhedron::Polyhedron,
+fn polyhedron_to_batch(poly: &Polyhedron,
                        ctx: &mut gfx::batch::Context,
                        dev: &mut gfx::GlDevice) -> PolyhedronBatch {
     let vertices = polyhedron_to_vertices(poly);
@@ -121,71 +146,112 @@ fn polyhedron_to_batch(poly: &polyhedron::Polyhedron,
     ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
 }
 
-bitflags! {
-    flags CameraRotationFlags: u32 {
-        const CAMERA_STILL = 0x0,
-        const CAMERA_UP    = 0x1,
-        const CAMERA_DOWN  = 0x2,
-        const CAMERA_LEFT  = 0x4,
-        const CAMERA_RIGHT = 0x8
-    }
+struct Ray {
+    orig: Vector3<f32>,
+    dir: Vector3<f32>
 }
 
-struct Camera {
-    angle_xz: f32,
-    angle_y: f32,
-
-    rotate: CameraRotationFlags
+struct Plane {
+    normal: Vector3<f32>,
+    d: f32
 }
 
-impl Camera {
-    fn new() -> Camera {
-        Camera {
-            angle_xz: 0.0,
-            angle_y: 0.0,
-            rotate: CAMERA_STILL
+#[deriving(PartialEq, Eq)]
+enum PlaneSide {
+    Above,
+    On,
+    Below
+}
+
+impl Plane {
+    pub fn from_points(v1: &Vector3<f32>,
+                       v2: &Vector3<f32>,
+                       v3: &Vector3<f32>) -> Plane {
+        let e21 = v1.sub(v2);
+        let e32 = v2.sub(v3);
+        let e13 = v3.sub(v1);
+
+        Plane {
+            normal: Vector3::new(v1.y * e32.z + v2.y * e13.z + v3.y * e21.z,
+                                 v1.z * e32.x + v2.z * e13.x + v3.z * e21.x,
+                                 v1.x * e32.y + v2.x * e13.y + v3.x * e21.y).normalize(),
+            d: -(v1.x * (v2.y * v3.z - v3.y * v2.z) +
+                 v2.x * (v3.y * v1.z - v1.y * v3.z) +
+                 v3.x * (v1.y * v2.z - v2.y * v1.z))
         }
     }
 
-    pub fn to_view_matrix(&mut self) -> cgmath::Matrix4<f32> {
-        const RADIUS: f32 = 5.0;
-
-        let (sin_xz, cos_xz) = self.angle_xz.sin_cos();
-        let (sin_y, cos_y) = self.angle_y.sin_cos();
-
-        let x = RADIUS * cos_xz * cos_y;
-        let y = RADIUS * sin_y;
-        let z = RADIUS * sin_xz * cos_y;
-
-        cgmath::Matrix4::look_at(&cgmath::Point3::new(x, y, z),
-                                 &cgmath::Point3::new(0.0, 0.0, 0.0),
-                                 &cgmath::Vector3::unit_y())
+    pub fn intersection_point(&self, ray: &Ray) -> (Vector3<f32>, f32) {
+        let t = -(ray.orig.dot(&self.normal) + self.d) / ray.dir.dot(&self.normal);
+        (ray.orig.add(&ray.dir.mul_s(t)), t)
     }
 
-    pub fn update(&mut self, dt: f32) {
-        const EPSILON: f32 = 0.00001;
+    pub fn get_plane_side(&self, point: &Vector3<f32>) -> PlaneSide {
+        let dist = -point.dot(&self.normal);
 
-        let left = self.rotate.contains(CAMERA_LEFT);
-        let right = self.rotate.contains(CAMERA_RIGHT);
-        let up = self.rotate.contains(CAMERA_UP);
-        let down = self.rotate.contains(CAMERA_DOWN);
-
-        let dir_xz = right as f32 - left as f32;
-        let dir_y = down as f32 - up as f32;
-
-        self.angle_xz = (self.angle_xz + dt * dir_xz) % f32::consts::PI_2;
-        self.angle_y = (self.angle_y + dt * dir_y).min(f32::consts::FRAC_PI_2 - EPSILON)
-                                                  .max(-f32::consts::FRAC_PI_2 + EPSILON);
-    }
-
-    pub fn handle_key_action(&mut self,
-                             dir: CameraRotationFlags,
-                             action: glfw::Action) {
-        match action {
-            glfw::Action::Press => self.rotate.insert(dir),
-            glfw::Action::Release => self.rotate.remove(dir),
-            _ => {}
+        if dist < 0.0f32 {
+            PlaneSide::Above
+        } else if dist > 0.0f32 {
+            PlaneSide::Below
+        } else {
+            PlaneSide::On
         }
+    }
+}
+
+impl Ray {
+    pub fn towards_center(orig: &Point3<f32>) -> Ray {
+        let v = orig.to_vec();
+
+        Ray {
+            orig: v,
+            dir: v.neg().normalize()
+        }
+    }
+
+    pub fn intersection_dist(&self, verts: &[&Vector3<f32>, ..3]) -> Option<f32> {
+        let plane = Plane::from_points(verts[0], verts[1], verts[2]);
+        let (intersection, dist) = plane.intersection_point(self);
+
+        let planes = [Plane::from_points(&self.orig, verts[0], verts[1]),
+                      Plane::from_points(&self.orig, verts[1], verts[2]),
+                      Plane::from_points(&self.orig, verts[2], verts[0])];
+
+        if planes[0].get_plane_side(&intersection) != PlaneSide::Below
+                && planes[1].get_plane_side(&intersection) != PlaneSide::Below
+                && planes[2].get_plane_side(&intersection) != PlaneSide::Below {
+            Some(dist)
+        } else {
+            None
+        }
+    }
+}
+
+fn intersecting_triangle_id(poly: &Polyhedron,
+                            ray: &Ray) -> Option<uint> {
+    let mut nearest: Option<(uint, f32)> = None;
+
+    for i in range(0u, poly.faces.len()) {
+        let face = &poly.faces[i];
+        let dist = ray.intersection_dist(&[&poly.vertices[face.vertex_indices[0]].pos,
+                                           &poly.vertices[face.vertex_indices[1]].pos,
+                                           &poly.vertices[face.vertex_indices[2]].pos]);
+        match dist {
+            Some(dist) => match nearest {
+                Some((_, old_dist)) => {
+                    if old_dist > dist {
+                        nearest = Some((i, dist))
+                    }
+                },
+                None => nearest = Some((i, dist))
+            },
+            None => {}
+        }
+    }
+
+    match nearest {
+        Some((nearest_idx, _)) => Some(nearest_idx),
+        None => None
     }
 }
 
@@ -194,7 +260,11 @@ struct GameState<'a> {
     dev: gfx::GlDevice,
     renderer: render::Renderer<gfx::GlCommandBuffer>,
     uniforms: Uniforms,
-    camera: Camera
+    camera: camera::Camera,
+
+    update_accumulator: f32,
+
+    poly: Polyhedron
 }
 
 impl<'a> GameState<'a> {
@@ -202,10 +272,10 @@ impl<'a> GameState<'a> {
         let (width, height) = wnd.get_size();
         let aspect_ratio = width as f32 / height as f32;
         let view_angle = cgmath::deg(45.0f32);
-        let view: cgmath::AffineMatrix3<f32> = cgmath::Transform::look_at(
-            &cgmath::Point3::new(-5.0f32, -5.0, 0.0),
-            &cgmath::Point3::new(0.0f32, 0.0, 0.0),
-            &cgmath::Vector3::unit_z()
+        let view: AffineMatrix3<f32> = Transform::look_at(
+            &Point3::new(-5.0f32, -5.0, 0.0),
+            &Point3::new(0.0f32, 0.0, 0.0),
+            &Vector3::unit_z()
         );
 
         let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
@@ -216,11 +286,14 @@ impl<'a> GameState<'a> {
             dev: dev,
             renderer: renderer,
             uniforms: Uniforms {
-                world_mat: cgmath::Matrix4::identity().into_fixed(),
+                world_mat: Matrix4::identity().into_fixed(),
                 view_mat: view.mat.into_fixed(),
-                proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).into_fixed()
+                proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).into_fixed(),
+                highlighted_id: -1
             },
-            camera: Camera::new()
+            camera: camera::Camera::new(),
+            update_accumulator: 0.0,
+            poly: polyhedron::make_sphere(3)
         }
     }
 
@@ -230,22 +303,44 @@ impl<'a> GameState<'a> {
                 glfw::Key::Escape =>
                     self.wnd.set_should_close(true),
                 glfw::Key::A =>
-                    self.camera.handle_key_action(CAMERA_LEFT, action),
+                    self.camera.handle_key_action(camera::CAMERA_LEFT, action),
                 glfw::Key::D =>
-                    self.camera.handle_key_action(CAMERA_RIGHT, action),
+                    self.camera.handle_key_action(camera::CAMERA_RIGHT, action),
                 glfw::Key::W =>
-                    self.camera.handle_key_action(CAMERA_UP, action),
+                    self.camera.handle_key_action(camera::CAMERA_UP, action),
                 glfw::Key::S =>
-                    self.camera.handle_key_action(CAMERA_DOWN, action),
+                    self.camera.handle_key_action(camera::CAMERA_DOWN, action),
                 _ => {}
             },
             _ => {}
         }
     }
 
-    pub fn update(&mut self, dt: f32) {
+    fn update_step(&mut self, dt: f32) {
         self.camera.update(dt);
         self.uniforms.view_mat = self.camera.to_view_matrix().into_fixed();
+
+        let ray = Ray::towards_center(&self.camera.get_eye());
+        let selected_id = intersecting_triangle_id(&self.poly, &ray);
+        println!("highlight: {}", selected_id);
+
+        self.uniforms.highlighted_id = match selected_id {
+            Some(id) => id as i32,
+            None => -1
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        const UPDATE_STEP: f32 = 1.0 / 30.0;
+
+        self.update_accumulator += dt;
+        while self.update_accumulator > UPDATE_STEP {
+            self.update_accumulator -= UPDATE_STEP;
+
+            time_it!("update step", {
+                self.update_step(UPDATE_STEP);
+            });
+        }
     }
 }
 
@@ -255,8 +350,7 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  frame: &gfx::Frame) {
     let mut ctx = gfx::batch::Context::new();
 
-    let sphere = polyhedron::make_sphere(3);
-    let batch = polyhedron_to_batch(&sphere, &mut ctx, &mut game.dev);
+    let batch = polyhedron_to_batch(&game.poly, &mut ctx, &mut game.dev);
 
     let clear_data = gfx::ClearData {
         color: [0.0, 0.0, 0.2, 1.0],
