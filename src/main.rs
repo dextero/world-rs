@@ -263,7 +263,6 @@ fn intersecting_triangle_id(poly: &Polyhedron,
         match dist {
             Some(dist) => match nearest {
                 Some((_, old_dist)) => {
-                    println!("intersection with {}", i);
                     if old_dist > dist {
                         nearest = Some((i, dist))
                     }
@@ -313,7 +312,7 @@ impl<'a> GameState<'a> {
             uniforms: Uniforms {
                 world_mat: Matrix4::identity().into_fixed(),
                 view_mat: view.mat.into_fixed(),
-                proj_mat: cgmath::perspective(view_angle, aspect_ratio, 1.0, 100.0).into_fixed(),
+                proj_mat: cgmath::perspective(view_angle, aspect_ratio, 0.001, 100.0).into_fixed(),
                 highlighted_id: -1
             },
             camera: camera::Camera::new(),
@@ -335,6 +334,10 @@ impl<'a> GameState<'a> {
                     self.camera.handle_key_action(camera::CAMERA_UP, action),
                 glfw::Key::S =>
                     self.camera.handle_key_action(camera::CAMERA_DOWN, action),
+                glfw::Key::KpAdd | glfw::Key::Equal =>
+                    self.camera.handle_key_action(camera::CAMERA_ZOOM_IN, action),
+                glfw::Key::KpSubtract | glfw::Key::Minus =>
+                    self.camera.handle_key_action(camera::CAMERA_ZOOM_OUT, action),
                 _ => {}
             },
             _ => {}
@@ -347,7 +350,6 @@ impl<'a> GameState<'a> {
 
         let ray = Ray::towards_center(&self.camera.get_eye());
         let selected_id = intersecting_triangle_id(&self.poly, &ray);
-        println!("highlight: {}", selected_id);
 
         self.uniforms.highlighted_id = match selected_id {
             Some(id) => id as i32,
