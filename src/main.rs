@@ -30,7 +30,7 @@ macro_rules! time_it(
         let __start_time = time::precise_time_s();
         let __ret = $expr;
         let __end_time = time::precise_time_s();
-        //println!("{}: {}s", $name, __end_time - __start_time);
+        println!("{}: {}s", $name, __end_time - __start_time);
         __ret
     });
 )
@@ -80,7 +80,7 @@ uniform int u_highlighted_id;
 void main() {
     gl_Position = u_proj * u_view * u_world * vec4(a_pos, 1.0);
     if (a_id == u_highlighted_id) {
-        v_color = vec4(1.0, 1.0, 1.0, 1.0);
+        v_color = -vec4(1.0, 1.0, 1.0, 0.0) * 0.3 + a_color;
     } else {
         v_color = a_color;
     }
@@ -110,7 +110,6 @@ fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
     let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
     let c = 0.5;
     let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
-    println!("hue: {}, x: {}", hue, x);
 
     let rgb = match hue {
         0.0 ... 1.0  => [c, x, 0.0],
@@ -169,11 +168,13 @@ fn polyhedron_to_batch(poly: &Polyhedron,
     ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
 }
 
+#[deriving(Show)]
 struct Ray {
     orig: Vector3<f32>,
     dir: Vector3<f32>
 }
 
+#[deriving(Show)]
 struct Plane {
     normal: Vector3<f32>,
     d: f32
@@ -262,7 +263,7 @@ fn intersecting_triangle_id(poly: &Polyhedron,
         match dist {
             Some(dist) => match nearest {
                 Some((_, old_dist)) => {
-                    //println!("intersection with {}", i);
+                    println!("intersection with {}", i);
                     if old_dist > dist {
                         nearest = Some((i, dist))
                     }
@@ -346,7 +347,7 @@ impl<'a> GameState<'a> {
 
         let ray = Ray::towards_center(&self.camera.get_eye());
         let selected_id = intersecting_triangle_id(&self.poly, &ray);
-        //println!("highlight: {}", selected_id);
+        println!("highlight: {}", selected_id);
 
         self.uniforms.highlighted_id = match selected_id {
             Some(id) => id as i32,

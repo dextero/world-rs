@@ -134,26 +134,26 @@ fn make_icosahedron() -> Polyhedron {
         Edge::new( 6,  9), Edge::new( 7, 10), Edge::new( 7, 11), Edge::new( 8,  9), Edge::new(10, 11)
     ]);
     ret.faces.push_all(&[
-        Face::new(0,  1,  8,  0,  7,  3),
-        Face::new(0,  4,  5,  1, 18,  2),
-        Face::new(0,  5, 10,  2, 21,  4),
-        Face::new(0,  8,  4,  3, 19,  1),
-        Face::new(0, 10,  1,  4,  8,  0),
-        Face::new(1,  6,  8,  5, 24,  7),
-        Face::new(1,  7,  6,  6, 23,  5),
-        Face::new(1, 10,  7,  8, 26,  6),
-        Face::new(2,  3, 11,  9, 17, 13),
-        Face::new(2,  4,  9, 10, 20, 12),
-        Face::new(2,  5,  4, 11, 18, 10),
-        Face::new(2,  9,  3, 12, 16,  9),
-        Face::new(2, 11,  5, 13, 22, 11),
-        Face::new(3,  6,  7, 14, 23, 15),
-        Face::new(3,  7, 11, 15, 27, 17),
-        Face::new(3,  9,  6, 16, 25, 14),
-        Face::new(4,  8,  9, 19, 28, 20),
-        Face::new(5, 11, 10, 22, 29, 21),
-        Face::new(6,  9,  8, 25, 28, 24),
-        Face::new(7, 10, 11, 26, 29, 27)
+        Face::new( 1, 0,  8,  0,  7,  3),
+        Face::new( 4, 0,  5,  1, 18,  2),
+        Face::new( 5, 0, 10,  2, 21,  4),
+        Face::new( 8, 0,  4,  3, 19,  1),
+        Face::new(10, 0,  1,  4,  8,  0),
+        Face::new( 6, 1,  8,  5, 24,  7),
+        Face::new( 7, 1,  6,  6, 23,  5),
+        Face::new(10, 1,  7,  8, 26,  6),
+        Face::new( 3, 2, 11,  9, 17, 13),
+        Face::new( 4, 2,  9, 10, 20, 12),
+        Face::new( 5, 2,  4, 11, 18, 10),
+        Face::new( 9, 2,  3, 12, 16,  9),
+        Face::new(11, 2,  5, 13, 22, 11),
+        Face::new( 6, 3,  7, 14, 23, 15),
+        Face::new( 7, 3, 11, 15, 27, 17),
+        Face::new( 9, 3,  6, 16, 25, 14),
+        Face::new( 8, 4,  9, 19, 28, 20),
+        Face::new(11, 5, 10, 22, 29, 21),
+        Face::new( 9, 6,  8, 25, 28, 24),
+        Face::new(10, 7, 11, 26, 29, 27)
     ]);
 
     for i in range(0, ret.edges.len()) {
@@ -269,7 +269,7 @@ fn refine(poly: &Polyhedron) -> Polyhedron {
 
         ret.faces.push(Face::new(v1_idx, v12_idx, v31_idx, e1_12_idx, e12_31_idx, e31_1_idx));
         ret.faces.push(Face::new(v12_idx, v2_idx, v23_idx, e12_2_idx, e2_23_idx, e12_23_idx));
-        ret.faces.push(Face::new(v23_idx, v3_idx, v31_idx, e23_3_idx, e3_31_idx, e23_31_idx));
+        ret.faces.push(Face::new(v31_idx, v23_idx, v3_idx, e23_31_idx, e23_3_idx, e3_31_idx));
         ret.faces.push(Face::new(v12_idx, v23_idx, v31_idx, e12_23_idx, e23_31_idx, e12_31_idx));
     }
 
