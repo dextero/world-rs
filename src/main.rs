@@ -26,11 +26,14 @@ mod polyhedron;
 mod camera;
 
 macro_rules! time_it(
-    ($name:expr, $expr:block) => ({
+    ($name:expr, $limit:expr, $expr:block) => ({
         let __start_time = time::precise_time_s();
         let __ret = $expr;
         let __end_time = time::precise_time_s();
         println!("{}: {}s", $name, __end_time - __start_time);
+        if ($limit) as f64 > 0.0 && __end_time - __start_time > ($limit) as f64 {
+            panic!("time limit ({}s) exceeded", $limit);
+        }
         __ret
     });
 )
@@ -317,7 +320,7 @@ impl<'a> GameState<'a> {
             },
             camera: camera::Camera::new(),
             update_accumulator: 0.0,
-            poly: polyhedron::make_sphere(3)
+            poly: polyhedron::make_sphere(4)
         }
     }
 
@@ -364,7 +367,7 @@ impl<'a> GameState<'a> {
         while self.update_accumulator > UPDATE_STEP {
             self.update_accumulator -= UPDATE_STEP;
 
-            time_it!("update step", {
+            time_it!("update step", 0.02f64, {
                 self.update_step(UPDATE_STEP);
             });
         }
