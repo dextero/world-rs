@@ -56,7 +56,7 @@ impl<'a> GameState<'a> {
         let poly = polyhedron::make_sphere(4);
         let mut world = World::new(poly, 10u);
 
-        world.simulate_plates(10u);
+        //world.simulate_plates(10u);
 
         GameState {
             wnd: wnd,

@@ -3,7 +3,7 @@ extern crate gfx;
 
 use std::vec::Vec;
 use std::rand::{task_rng, Rng};
-use core::f32::consts::{PI, FRAC_PI_3};
+use core::f32::consts::{PI, PI_2, FRAC_PI_3};
 use std::num::{Float, FloatMath};
 
 use time;
@@ -86,7 +86,8 @@ impl Plate {
 pub struct World {
     poly: Polyhedron,
     verts: Vec<PlatePoint>,
-    plates: Vec<Plate>
+    plates: Vec<Plate>,
+    verts_to_plates: Vec<uint>
 }
 
 fn get_nbr_idx(edge: &Edge, vert_idx: uint) -> uint {
@@ -140,7 +141,7 @@ fn flood_fill(verts: &Vec<PlatePoint>,
 }
 
 fn random_partition(verts: &Vec<PlatePoint>,
-                    num_plates: uint) -> Vec<Plate> {
+                    num_plates: uint) -> (Vec<Plate>, Vec<uint>) {
     let mut plate_id_for_verts = Vec::from_elem(verts.len(), -1i);
     let mut plate_points = Vec::with_capacity(num_plates);
 
@@ -165,7 +166,8 @@ fn random_partition(verts: &Vec<PlatePoint>,
         flood_fill(verts, &mut plate_id_for_verts, &mut plate_points);
     });
 
-    plate_points.iter().map(|points| Plate::from_points(points.clone())).collect()
+    (plate_points.iter().map(|points| Plate::from_points(points.clone())).collect(),
+     plate_id_for_verts.iter().map(|&i| i as uint).collect())
 }
 
 fn color_for_y(col: f32, y: f32) -> f32 {
@@ -192,6 +194,11 @@ fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
      1.0]
 }
 
+fn color_by_idx(idx: uint, max_idx: uint) -> [f32, ..4] {
+    let hue = idx as f32 * PI_2 / max_idx as f32;
+    let (hue_sin, hue_cos) = hue.sin_cos();
+    color_for_pos(&Vector3::new(hue_cos, 0.0, hue_sin))
+}
 
 impl World {
     pub fn new(poly: Polyhedron,
@@ -211,7 +218,7 @@ impl World {
             verts.push(PlatePoint::new(&vert.pos, nbr_indices));
         }
 
-        let plates = random_partition(&verts, num_plates);
+        let (plates, verts_to_plates) = random_partition(&verts, num_plates);
         for plate in plates.iter() {
             for &vert_idx in plate.vertex_indices.iter() {
                 verts[vert_idx].speed = plate.move_speed;
@@ -221,7 +228,8 @@ impl World {
         World {
             poly: poly,
             verts: verts,
-            plates: plates
+            plates: plates,
+            verts_to_plates: verts_to_plates
         }
     }
 
@@ -256,7 +264,8 @@ impl World {
                          &poly.vertices[face.vertex_indices[2]].pos];
 
             let mean_pos = verts[0].add(verts[1]).add(verts[2]).div_s(3.0);
-            let face_col = color_for_pos(&mean_pos);
+            //let face_col = color_for_pos(&mean_pos);
+            let face_col = color_by_idx(self.verts_to_plates[face.vertex_indices[0]], self.plates.len()); // TODO
 
             for &v in verts.iter() {
                 vertices.push(Vertex {
