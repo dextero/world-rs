@@ -98,6 +98,7 @@ fn get_nbr_idx(edge: &Edge, vert_idx: uint) -> uint {
 }
 
 fn assign_neighbors(plate_points: &mut Vec<Vec<uint>>,
+                    new_frontier: &mut Vec<uint>,
                     plate_id_for_verts: &mut Vec<int>,
                     plate_idx: uint,
                     nbr_indices: &Vec<uint>) -> uint {
@@ -107,6 +108,7 @@ fn assign_neighbors(plate_points: &mut Vec<Vec<uint>>,
         if plate_id_for_verts[nbr_idx] == -1 {
             plate_id_for_verts[nbr_idx] = plate_idx as int;
             plate_points[plate_idx].push(nbr_idx);
+            new_frontier.push(nbr_idx);
             num_assigned += 1;
         }
     }
@@ -118,13 +120,21 @@ fn flood_fill(verts: &Vec<PlatePoint>,
               plate_id_for_verts: &mut Vec<int>,
               plate_points: &mut Vec<Vec<uint>>) {
     let mut filled_points = plate_points.len();
+    let mut frontier_points = plate_points.clone();
 
     while filled_points < verts.len() {
+        println!("{} points to go", verts.len() - filled_points);
+
         for plate_idx in range(0u, plate_points.len()) {
-            for point_idx in range(0u, plate_points[plate_idx].len()) {
-                filled_points += assign_neighbors(plate_points, plate_id_for_verts, plate_idx,
+            let mut new_frontier = Vec::new();
+
+            for &point_idx in frontier_points[plate_idx].iter() {
+                filled_points += assign_neighbors(plate_points, &mut new_frontier,
+                                                  plate_id_for_verts, plate_idx,
                                                   &verts[point_idx].nbr_indices);
             }
+
+            frontier_points[plate_idx] = new_frontier;
         }
     }
 }
@@ -135,6 +145,7 @@ fn random_partition(verts: &Vec<PlatePoint>,
     let mut plate_points = Vec::with_capacity(num_plates);
 
     for plate_idx in range(0u, num_plates) {
+        println!("finding origin of plate {}/{} ({} verts total)", plate_idx, num_plates, verts.len());
         loop {
             let idx = task_rng().gen_range(0u, verts.len());
 
@@ -150,7 +161,10 @@ fn random_partition(verts: &Vec<PlatePoint>,
         }
     }
 
-    flood_fill(verts, &mut plate_id_for_verts, &mut plate_points);
+    time_it!("flood fill", 5.0f64, {
+        flood_fill(verts, &mut plate_id_for_verts, &mut plate_points);
+    });
+
     plate_points.iter().map(|points| Plate::from_points(points.clone())).collect()
 }
 

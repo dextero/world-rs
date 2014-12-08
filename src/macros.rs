@@ -1,5 +1,6 @@
 macro_rules! time_it(
     ($name:expr, $limit:expr, $expr:block) => ({
+        println!("{}: start", $name);
         let __start_time = time::precise_time_s();
         let __ret = $expr;
         let __end_time = time::precise_time_s();
