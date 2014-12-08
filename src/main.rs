@@ -1,5 +1,4 @@
 #![feature(phase)]
-#![feature(macro_rules)]
 
 extern crate time;
 extern crate glfw;
@@ -12,168 +11,22 @@ extern crate render;
 extern crate device;
 extern crate core;
 
-use std::vec::Vec;
-use std::iter::IteratorExt;
-use std::num::{Float, FloatMath};
-use core::f32::consts::{PI, FRAC_PI_3};
-
-use gfx::{Device, DeviceHelper, ToSlice};
+use gfx::{Device, DeviceHelper};
 use gfx::GlCommandBuffer;
 use glfw::Context;
-use cgmath::{Vector, Point, Point3, Vector3, Matrix4, FixedArray, AffineMatrix3, Transform};
+use cgmath::{Point3, Vector3, Matrix4, FixedArray, AffineMatrix3, Transform};
 
-use polyhedron::Polyhedron;
 use collisions::{intersecting_triangle_id, Ray};
+use world::World;
+use rendering::Uniforms;
 
 mod camera;
 mod polyhedron;
 mod collisions;
+mod world;
+mod rendering;
 
-macro_rules! time_it(
-    ($name:expr, $limit:expr, $expr:block) => ({
-        let __start_time = time::precise_time_s();
-        let __ret = $expr;
-        let __end_time = time::precise_time_s();
-        println!("{}: {}s", $name, __end_time - __start_time);
-        if ($limit) as f64 > 0.0 && __end_time - __start_time > ($limit) as f64 {
-            panic!("time limit ({}s) exceeded", $limit);
-        }
-        __ret
-    });
-)
-
-#[vertex_format]
-struct Vertex {
-    #[name = "a_pos"]
-    pos: [f32, ..3],
-
-    #[name = "a_color"]
-    color: [f32, ..4],
-
-    #[name = "a_id"]
-    id: i32
-}
-
-#[shader_param(PolyhedronBatch)]
-struct Uniforms {
-    #[name = "u_world"]
-    world_mat: [[f32, ..4], ..4],
-
-    #[name = "u_view"]
-    view_mat: [[f32, ..4], ..4],
-
-    #[name = "u_proj"]
-    proj_mat: [[f32, ..4], ..4],
-
-    #[name = "u_highlighted_id"]
-    highlighted_id: i32
-}
-
-static VS_SOURCE: gfx::ShaderSource<'static> = shaders! {
-GLSL_150: b"
-#version 150 core
-
-in vec3 a_pos;
-in vec4 a_color;
-in int a_id;
-
-out vec4 v_color;
-
-uniform mat4 u_world;
-uniform mat4 u_view;
-uniform mat4 u_proj;
-uniform int u_highlighted_id;
-
-void main() {
-    gl_Position = u_proj * u_view * u_world * vec4(a_pos, 1.0);
-    if (a_id == u_highlighted_id) {
-        v_color = -vec4(1.0, 1.0, 1.0, 0.0) * 0.3 + a_color;
-    } else {
-        v_color = a_color;
-    }
-}
-"
-};
-
-static FS_SOURCE: gfx::ShaderSource<'static> = shaders! {
-GLSL_150: b"
-#version 150 core
-
-in vec4 v_color;
-
-out vec4 out_color;
-
-void main() {
-    out_color = v_color;
-}
-"
-};
-
-fn color_for_y(col: f32, y: f32) -> f32 {
-    (y.abs() * 0.8 + col).min(1.0)
-}
-
-fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
-    let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
-    let c = 0.5;
-    let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
-
-    let rgb = match hue {
-        0.0 ... 1.0  => [c, x, 0.0],
-        1.0 ... 2.0 => [x, c, 0.0],
-        2.0 ... 3.0 => [0.0, c, x],
-        3.0 ... 4.0 => [0.0, x, c],
-        4.0 ... 5.0 => [x, 0.0, c],
-        _                 => [c, 0.0, x]
-    };
-
-    [color_for_y(rgb[0], pos.y),
-     color_for_y(rgb[1], pos.y),
-     color_for_y(rgb[2], pos.y),
-     1.0]
-}
-
-fn polyhedron_to_vertices(poly: &Polyhedron) -> Vec<Vertex> {
-    let mut vertices = Vec::new();
-    vertices.reserve(poly.faces.len() * 3u);
-
-    for face_idx in range(0u, poly.faces.len()) {
-        let face = &poly.faces[face_idx];
-        let verts = [&poly.vertices[face.vertex_indices[0]].pos,
-                     &poly.vertices[face.vertex_indices[1]].pos,
-                     &poly.vertices[face.vertex_indices[2]].pos];
-
-        let mean_pos = verts[0].add(verts[1]).add(verts[2]).div_s(3.0);
-        let face_col = color_for_pos(&mean_pos);
-
-        for &v in verts.iter() {
-            vertices.push(Vertex {
-                pos: *v.as_fixed(),
-                color: face_col,
-                id: face_idx as i32
-            });
-        }
-    }
-
-    vertices
-}
-
-fn polyhedron_to_batch(poly: &Polyhedron,
-                       ctx: &mut gfx::batch::Context,
-                       dev: &mut gfx::GlDevice) -> PolyhedronBatch {
-    let vertices = polyhedron_to_vertices(poly);
-    let mesh = dev.create_mesh(vertices.as_slice());
-
-    let indices = range(0u32, vertices.len() as u32).collect::<Vec<u32>>();
-    let idx_slice = dev.create_buffer_static(indices.as_slice())
-                       .to_slice(gfx::PrimitiveType::TriangleList);
-
-    let shader = dev.link_program(VS_SOURCE.clone(), FS_SOURCE.clone())
-                    .unwrap();
-    let state = gfx::DrawState::new().depth(gfx::state::Comparison::LessEqual, true);
-
-    ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
-}
+include!("macros.rs")
 
 struct GameState<'a> {
     wnd: &'a glfw::Window,
@@ -184,7 +37,7 @@ struct GameState<'a> {
 
     update_accumulator: f32,
 
-    poly: Polyhedron
+    world: World
 }
 
 impl<'a> GameState<'a> {
@@ -200,6 +53,10 @@ impl<'a> GameState<'a> {
 
         let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
         let renderer = dev.create_renderer();
+        let poly = polyhedron::make_sphere(4);
+        let mut world = World::new(poly, 10u);
+
+        world.simulate_plates(10u);
 
         GameState {
             wnd: wnd,
@@ -213,7 +70,7 @@ impl<'a> GameState<'a> {
             },
             camera: camera::Camera::new(),
             update_accumulator: 0.0,
-            poly: polyhedron::make_sphere(4)
+            world: world
         }
     }
 
@@ -245,7 +102,7 @@ impl<'a> GameState<'a> {
         self.uniforms.view_mat = self.camera.to_view_matrix().into_fixed();
 
         let ray = Ray::towards_center(&self.camera.get_eye());
-        let selected_id = intersecting_triangle_id(&self.poly, &ray);
+        let selected_id = intersecting_triangle_id(self.world.get_poly(), &ray);
 
         self.uniforms.highlighted_id = match selected_id {
             Some(id) => id as i32,
@@ -272,8 +129,7 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  events: &std::comm::Receiver<(f64, glfw::WindowEvent)>,
                  frame: &gfx::Frame) {
     let mut ctx = gfx::batch::Context::new();
-
-    let batch = polyhedron_to_batch(&game.poly, &mut ctx, &mut game.dev);
+    let batch = game.world.to_batch(&mut ctx, &mut game.dev);
 
     let clear_data = gfx::ClearData {
         color: [0.0, 0.0, 0.2, 1.0],
