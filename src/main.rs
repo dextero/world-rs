@@ -135,7 +135,7 @@ impl<'a> GameState<'a> {
         while self.update_accumulator > UPDATE_STEP {
             self.update_accumulator -= UPDATE_STEP;
 
-            time_it!("update step", 0.05f64, {
+            time_it!("update step", 0.02f64, {
                 self.update_step(UPDATE_STEP);
             });
         }
@@ -170,12 +170,14 @@ fn game_loop<'a>(game: &mut GameState<'a>,
         game.update(delta_time);
         frame_start = frame_end;
 
-        game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
-        game.renderer.draw((&batch, &game.uniforms, &ctx), frame);
-        game.dev.submit(game.renderer.as_buffer());
-        game.renderer.reset();
+        time_it!("render frame", 0.02f64, {
+            game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
+            game.renderer.draw((&batch, &game.uniforms, &ctx), frame);
+            game.dev.submit(game.renderer.as_buffer());
+            game.renderer.reset();
 
-        game.wnd.swap_buffers();
+            game.wnd.swap_buffers();
+        });
     }
 }
 

@@ -167,7 +167,7 @@ impl PlateSimulation {
                        num_plates: uint,
                        rng: &mut R) -> PlateSimulation {
         if poly.faces.len() < num_plates {
-            panic!("cannot split {} faces into {} plates", poly.faces.len(), num_plates);
+            panic_bt!("cannot split {} faces into {} plates", poly.faces.len(), num_plates);
         }
 
         println!("splitting world into {} plates", num_plates);

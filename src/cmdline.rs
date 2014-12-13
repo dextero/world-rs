@@ -20,7 +20,7 @@ fn from_str_or_panic<T: FromStr>(text: &str) -> T {
     match from_str::<T>(text) {
         Some(val) => val,
         None => {
-            panic!("invalid value: {}, use -h for help", text);
+            panic_bt!("invalid value: {}, use -h for help", text);
         }
     }
 }
@@ -30,8 +30,8 @@ fn parse_rng_seed(arg: &str,
     let split: Vec<&str> = arg.split_str(",").collect();
 
     if split.len() > seed.len() {
-        panic!("excess RNG seed initializer elements: got {}, expected no more than {}",
-               split.len(), seed.len());
+        panic_bt!("excess RNG seed initializer elements: got {}, expected no more than {}",
+                  split.len(), seed.len());
     }
 
     for i in range(0u, min(seed.len(), split.len())) {
@@ -44,7 +44,7 @@ fn parse_resolution(arg: &str,
     let split: Vec<&str> = arg.split_str(",").collect();
 
     if split.len() != 2 {
-        panic!("invalid resolution format, got: {}, expected: WIDTH,HEIGHT", arg);
+        panic_bt!("invalid resolution format, got: {}, expected: WIDTH,HEIGHT", arg);
     }
 
     for i in range(0u, 2u) {
