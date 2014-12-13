@@ -2,7 +2,7 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use core::f32::consts::{PI, PI_2, FRAC_PI_3};
+use core::f32::consts::{PI_2, FRAC_PI_3};
 use std::num::{Float, FloatMath};
 
 use cgmath::{EuclideanVector, Vector, Vector3, FixedArray};
@@ -17,26 +17,6 @@ use plate_simulation::PlateSimulation;
 pub struct World {
     poly: Polyhedron
 }
-
-//fn color_for_y(col: f32, y: f32) -> f32 {
-//    (y.abs() * 0.8 + col).min(1.0)
-//}
-//fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
-//    let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
-//    let rgb = color_for_hue(hue);
-//
-//    [color_for_y(rgb[0], pos.y),
-//     color_for_y(rgb[1], pos.y),
-//     color_for_y(rgb[2], pos.y),
-//     1.0]
-//}
-//
-//fn color_by_idx(idx: uint, max_idx: uint) -> [f32, ..4] {
-//    let hue = idx as f32 * PI_2 / max_idx as f32;
-//    let (hue_sin, hue_cos) = hue.sin_cos();
-//    color_for_pos(&Vector3::new(hue_cos, 0.0, hue_sin))
-//}
-
 
 fn color_for_hue(hue: f32) -> [f32, ..4] {
     let c = 0.5;
