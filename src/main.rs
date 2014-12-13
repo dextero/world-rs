@@ -19,12 +19,14 @@ use cgmath::{Point3, Vector3, Matrix4, FixedArray, AffineMatrix3, Transform};
 use collisions::{intersecting_triangle_id, Ray};
 use world::World;
 use rendering::Uniforms;
+use plate_simulation::PlateSimulation;
 
 mod camera;
 mod polyhedron;
 mod collisions;
 mod world;
 mod rendering;
+mod plate_simulation;
 
 include!("macros.rs")
 
@@ -53,10 +55,14 @@ impl<'a> GameState<'a> {
 
         let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
         let renderer = dev.create_renderer();
-        let poly = polyhedron::make_sphere(4);
-        let mut world = World::new(poly, 10u);
 
-        //world.simulate_plates(10u);
+        let plate_sim_poly = polyhedron::make_sphere(2);
+        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 10u);
+        plate_sim.simulate_plates(10u);
+
+        let world_poly = polyhedron::make_sphere(4);
+        let mut world = World::new(world_poly);
+        world.apply_heights(&plate_sim);
 
         GameState {
             wnd: wnd,

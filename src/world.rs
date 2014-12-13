@@ -2,260 +2,100 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use std::rand::{task_rng, Rng};
 use core::f32::consts::{PI, PI_2, FRAC_PI_3};
 use std::num::{Float, FloatMath};
 
-use time;
-use cgmath::{EuclideanVector, Vector, Vector3, Basis3, Rotation, Rotation3, FixedArray, Rad, rad};
+use cgmath::{EuclideanVector, Vector, Vector3, FixedArray};
 use gfx::batch::Context;
 use gfx::{GlDevice, Device, DeviceHelper, ToSlice};
 
-use polyhedron::{Edge, Polyhedron};
-use rendering::{PolyhedronBatch, Vertex};
+use polyhedron::{Polyhedron};
 use rendering;
-
-include!("macros.rs")
-
-struct PlatePoint {
-    pos: Vector3<f32>,
-    nbr_indices: Vec<uint>,
-    pub speed: Rad<f32>
-}
-
-impl PlatePoint {
-    fn new(pos: &Vector3<f32>,
-           nbr_indices: Vec<uint>) -> PlatePoint {
-        PlatePoint {
-            pos: *pos,
-            nbr_indices: nbr_indices,
-            speed: rad(1.0)
-        }
-    }
-
-    fn move_around(&mut self, move_axis: &Vector3<f32>) {
-        let rot: Basis3<f32> = Rotation3::from_axis_angle(move_axis, self.speed);
-        self.pos = rot.rotate_vector(&self.pos);
-    }
-}
-
-struct Plate {
-    pub vertex_indices: Vec<uint>,
-    pub move_axis: Vector3<f32>,
-    pub move_speed: Rad<f32>,
-    pub height: f32
-}
-
-fn random_axis() -> Vector3<f32> {
-    let mut rng = task_rng();
-
-    Vector3::new(rng.gen_range(0.0001f32, 1.0),
-                 rng.gen_range(0.0001f32, 1.0),
-                 rng.gen_range(0.0001f32, 1.0)).normalize()
-}
-
-impl Plate {
-    fn new(vertex_indices: Vec<uint>,
-           move_axis: &Vector3<f32>,
-           move_speed: Rad<f32>,
-           height: f32) -> Plate {
-        Plate {
-            vertex_indices: vertex_indices,
-            move_axis: *move_axis,
-            move_speed: move_speed,
-            height: height
-        }
-    }
-
-    fn from_points(vertex_indices: Vec<uint>) -> Plate {
-        let mut rng = task_rng();
-
-        Plate::new(vertex_indices,
-                   &random_axis(),
-                   rad(rng.gen_range(0.01f32, 0.1)),
-                   rng.gen_range(0.8f32, 1.2))
-    }
-
-    fn simulate(&self, vertices: &mut Vec<PlatePoint>) {
-        for &idx in self.vertex_indices.iter() {
-            vertices[idx].move_around(&self.move_axis);
-        }
-    }
-}
+use rendering::{PolyhedronBatch, Vertex};
+use plate_simulation::PlateSimulation;
 
 pub struct World {
-    poly: Polyhedron,
-    verts: Vec<PlatePoint>,
-    plates: Vec<Plate>,
-    verts_to_plates: Vec<uint>
+    poly: Polyhedron
 }
 
-fn get_nbr_idx(edge: &Edge, vert_idx: uint) -> uint {
-    if edge.vertex_indices[0] == vert_idx {
-        edge.vertex_indices[1]
-    } else {
-        edge.vertex_indices[0]
-    }
-}
+//fn color_for_y(col: f32, y: f32) -> f32 {
+//    (y.abs() * 0.8 + col).min(1.0)
+//}
+//fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
+//    let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
+//    let rgb = color_for_hue(hue);
+//
+//    [color_for_y(rgb[0], pos.y),
+//     color_for_y(rgb[1], pos.y),
+//     color_for_y(rgb[2], pos.y),
+//     1.0]
+//}
+//
+//fn color_by_idx(idx: uint, max_idx: uint) -> [f32, ..4] {
+//    let hue = idx as f32 * PI_2 / max_idx as f32;
+//    let (hue_sin, hue_cos) = hue.sin_cos();
+//    color_for_pos(&Vector3::new(hue_cos, 0.0, hue_sin))
+//}
 
-fn assign_neighbors(plate_points: &mut Vec<Vec<uint>>,
-                    new_frontier: &mut Vec<uint>,
-                    plate_id_for_verts: &mut Vec<int>,
-                    plate_idx: uint,
-                    nbr_indices: &Vec<uint>) -> uint {
-    let mut num_assigned = 0u;
 
-    for &nbr_idx in nbr_indices.iter() {
-        if plate_id_for_verts[nbr_idx] == -1 {
-            plate_id_for_verts[nbr_idx] = plate_idx as int;
-            plate_points[plate_idx].push(nbr_idx);
-            new_frontier.push(nbr_idx);
-            num_assigned += 1;
-        }
-    }
-
-    num_assigned
-}
-
-fn flood_fill(verts: &Vec<PlatePoint>,
-              plate_id_for_verts: &mut Vec<int>,
-              plate_points: &mut Vec<Vec<uint>>) {
-    let mut filled_points = plate_points.len();
-    let mut frontier_points = plate_points.clone();
-
-    while filled_points < verts.len() {
-        println!("{} points to go", verts.len() - filled_points);
-
-        for plate_idx in range(0u, plate_points.len()) {
-            let mut new_frontier = Vec::new();
-
-            for &point_idx in frontier_points[plate_idx].iter() {
-                filled_points += assign_neighbors(plate_points, &mut new_frontier,
-                                                  plate_id_for_verts, plate_idx,
-                                                  &verts[point_idx].nbr_indices);
-            }
-
-            frontier_points[plate_idx] = new_frontier;
-        }
-    }
-}
-
-fn random_partition(verts: &Vec<PlatePoint>,
-                    num_plates: uint) -> (Vec<Plate>, Vec<uint>) {
-    let mut plate_id_for_verts = Vec::from_elem(verts.len(), -1i);
-    let mut plate_points = Vec::with_capacity(num_plates);
-
-    for plate_idx in range(0u, num_plates) {
-        println!("finding origin of plate {}/{} ({} verts total)", plate_idx, num_plates, verts.len());
-        loop {
-            let idx = task_rng().gen_range(0u, verts.len());
-
-            if plate_id_for_verts[idx] == -1 {
-                plate_id_for_verts[idx] = plate_idx as int;
-
-                let plate_idx = plate_points.len();
-                plate_points.push(Vec::new());
-                plate_points[plate_idx].push(idx);
-
-                break
-            }
-        }
-    }
-
-    time_it!("flood fill", 5.0f64, {
-        flood_fill(verts, &mut plate_id_for_verts, &mut plate_points);
-    });
-
-    (plate_points.iter().map(|points| Plate::from_points(points.clone())).collect(),
-     plate_id_for_verts.iter().map(|&i| i as uint).collect())
-}
-
-fn color_for_y(col: f32, y: f32) -> f32 {
-    (y.abs() * 0.8 + col).min(1.0)
-}
-
-fn color_for_pos(pos: &Vector3<f32>) -> [f32, ..4] {
-    let hue = (pos.z.atan2(pos.x) + PI) / FRAC_PI_3;
+fn color_for_hue(hue: f32) -> [f32, ..4] {
     let c = 0.5;
     let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
 
     let rgb = match hue {
-        0.0 ... 1.0  => [c, x, 0.0],
+        0.0 ... 1.0 => [c, x, 0.0],
         1.0 ... 2.0 => [x, c, 0.0],
         2.0 ... 3.0 => [0.0, c, x],
         3.0 ... 4.0 => [0.0, x, c],
         4.0 ... 5.0 => [x, 0.0, c],
-        _                 => [c, 0.0, x]
+        _           => [c, 0.0, x]
     };
 
-    [color_for_y(rgb[0], pos.y),
-     color_for_y(rgb[1], pos.y),
-     color_for_y(rgb[2], pos.y),
-     1.0]
+    [rgb[0], rgb[1], rgb[2], 1.0]
 }
 
-fn color_by_idx(idx: uint, max_idx: uint) -> [f32, ..4] {
-    let hue = idx as f32 * PI_2 / max_idx as f32;
-    let (hue_sin, hue_cos) = hue.sin_cos();
-    color_for_pos(&Vector3::new(hue_cos, 0.0, hue_sin))
+fn color_by_height(height: f32, min_height: f32, max_height: f32) -> [f32, ..4] {
+    let diff = max_height - min_height;
+    let relative_height = (height - min_height) / diff;
+    let hue = ((FRAC_PI_3 * 4.0 - relative_height * PI_2) + PI_2) % PI_2;
+    color_for_hue(hue)
+}
+
+fn get_min_max_length<Iter: Iterator<Vector3<f32>>>(iter: &mut Iter) -> (f32, f32) {
+    let mut min_len_sq = iter.next().unwrap().length2();
+    let mut max_len_sq = min_len_sq;
+
+    println!("initial = {}", min_len_sq);
+
+    loop {
+        match iter.next() {
+            Some(v) => {
+                println!("next = {}", v.length2());
+                min_len_sq = min_len_sq.min(v.length2());
+                max_len_sq = max_len_sq.max(v.length2());
+            },
+            None => break
+        }
+    }
+
+    (min_len_sq.sqrt(), max_len_sq.sqrt())
 }
 
 impl World {
-    pub fn new(poly: Polyhedron,
-               num_plates: uint) -> World {
-        if poly.faces.len() < num_plates {
-            panic!("cannot split {} faces into {} plates", poly.faces.len(), num_plates);
-        }
-
-        println!("splitting world into {} plates", num_plates);
-        let mut verts = Vec::with_capacity(poly.vertices.len());
-
-        for vert_idx in range(0u, poly.vertices.len()) {
-            let vert = &poly.vertices[vert_idx];
-            let nbr_indices = vert.edge_indices.iter()
-                                  .map(|&i| get_nbr_idx(&poly.edges[i], vert_idx))
-                                  .collect();
-            verts.push(PlatePoint::new(&vert.pos, nbr_indices));
-        }
-
-        let (plates, verts_to_plates) = random_partition(&verts, num_plates);
-        for plate in plates.iter() {
-            for &vert_idx in plate.vertex_indices.iter() {
-                verts[vert_idx].speed = plate.move_speed;
-            }
-        }
-
-        World {
-            poly: poly,
-            verts: verts,
-            plates: plates,
-            verts_to_plates: verts_to_plates
-        }
+    pub fn new(poly: Polyhedron) -> World {
+        World { poly: poly }
     }
 
     pub fn get_poly(&self) -> &Polyhedron {
         &self.poly
     }
 
-    fn simulate_plates_step(&mut self) {
-        for plate in self.plates.iter() {
-            plate.simulate(&mut self.verts);
-        }
-    }
-
-    pub fn simulate_plates(&mut self, steps: uint) {
-        println!("simulating {} tectonic plate steps", steps);
-
-        for _ in range(0u, steps) {
-            time_it!("step", 1.0f64, {
-                self.simulate_plates_step();
-            });
-        }
-    }
-
     fn get_vertices(&self) -> Vec<Vertex> {
         let poly = &self.poly;
+        let (min_h, max_h) = get_min_max_length(&mut self.poly.vertices.iter().map(|v| v.pos));
         let mut vertices = Vec::with_capacity(poly.faces.len() * 3u);
+
+        println!("min = {}, max = {}", min_h, max_h);
 
         for face_idx in range(0u, poly.faces.len()) {
             let face = &poly.faces[face_idx];
@@ -265,7 +105,8 @@ impl World {
 
             let mean_pos = verts[0].add(verts[1]).add(verts[2]).div_s(3.0);
             //let face_col = color_for_pos(&mean_pos);
-            let face_col = color_by_idx(self.verts_to_plates[face.vertex_indices[0]], self.plates.len()); // TODO
+            let face_col = color_by_height(mean_pos.length(), min_h, max_h);
+            //let face_col = color_by_idx(self.verts_to_plates[face.vertex_indices[0]], self.plates.len()); // TODO
 
             for &v in verts.iter() {
                 vertices.push(Vertex {
@@ -294,6 +135,44 @@ impl World {
         let state = gfx::DrawState::new().depth(gfx::state::Comparison::LessEqual, true);
 
         ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
+    }
+
+    pub fn apply_heights(&mut self,
+                         plate_sim: &PlateSimulation) {
+        const DOT_THRESHOLD: f32 = 0.1;
+
+        let mut deltas = Vec::with_capacity(self.poly.vertices.len());
+        let mut min_delta = deltas.len() as f32;
+        let mut max_delta = 0.0f32;
+
+        for v in self.poly.vertices.iter() {
+            let mut delta = 0.0f32;
+            let mut nbr_count = 0u;
+
+            for v2 in plate_sim.verts.iter() {
+                let dot = v.pos.dot(&v2.pos);
+                if dot > DOT_THRESHOLD {
+                    delta += dot;
+                    nbr_count += 1;
+                }
+            }
+
+            delta /= nbr_count as f32;
+            deltas.push(delta);
+
+            min_delta = min_delta.min(delta);
+            max_delta = max_delta.max(delta);
+        }
+
+        let half = (min_delta + max_delta) / 2.0;
+        let diff = max_delta - min_delta;
+        let factor = 2.0 / diff;
+        let scale = |i| 1.0 + (deltas[i] - half) * factor;
+
+        for i in range(0u, self.poly.vertices.len()) {
+            let v = &mut self.poly.vertices[i].pos;
+            *v = v.mul_s(scale(i));
+        }
     }
 }
 
