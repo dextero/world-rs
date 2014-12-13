@@ -1,3 +1,17 @@
+macro_rules! println_err(
+    ($($arg:tt)*) => ({
+        let mut stderr = ::std::io::stdio::stderr();
+        match format_args!(|args| stderr.write_fmt(args), $($arg)*) {
+            Err(_) => { panic!("println_err failed"); },
+            _ => {}
+        }
+        match stderr.write_str("\n") {
+            Err(_) => { panic!("println_err failed"); },
+            _ => {}
+        }
+    })
+)
+
 macro_rules! time_it(
     ($name:expr, $limit:expr, $expr:block) => ({
         println!("{}: start", $name);

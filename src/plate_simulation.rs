@@ -2,8 +2,8 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use std::rand::{task_rng, Rng};
-use std::num::{FloatMath};
+use std::num::FloatMath;
+use std::rand::Rng;
 
 use time;
 use cgmath::{EuclideanVector, Vector, Vector3, Basis3, Rotation, Rotation3, Rad, rad};
@@ -41,9 +41,7 @@ struct Plate {
     pub height: f32
 }
 
-fn random_axis() -> Vector3<f32> {
-    let mut rng = task_rng();
-
+fn random_axis<R: Rng>(rng: &mut R) -> Vector3<f32> {
     Vector3::new(rng.gen_range(0.0001f32, 1.0),
                  rng.gen_range(0.0001f32, 1.0),
                  rng.gen_range(0.0001f32, 1.0)).normalize()
@@ -62,13 +60,12 @@ impl Plate {
         }
     }
 
-    fn from_points(vertex_indices: Vec<uint>) -> Plate {
+    fn from_points<R: Rng>(rng: &mut R,
+                           vertex_indices: Vec<uint>) -> Plate {
         const HEIGHT_DEV: f32 = 0.02;
 
-        let mut rng = task_rng();
-
         Plate::new(vertex_indices,
-                   &random_axis(),
+                   &random_axis(rng),
                    rad(rng.gen_range(0.01f32, 0.1)),
                    rng.gen_range(1.0 - HEIGHT_DEV, 1.0 + HEIGHT_DEV))
     }
@@ -130,15 +127,16 @@ fn flood_fill(verts: &Vec<PlatePoint>,
     }
 }
 
-fn random_partition(verts: &Vec<PlatePoint>,
-                    num_plates: uint) -> Vec<Plate> {
+fn random_partition<R: Rng>(rng: &mut R,
+                            verts: &Vec<PlatePoint>,
+                            num_plates: uint) -> Vec<Plate> {
     let mut plate_id_for_verts = Vec::from_elem(verts.len(), -1i);
     let mut plate_points = Vec::with_capacity(num_plates);
 
     for plate_idx in range(0u, num_plates) {
         println!("finding origin of plate {}/{} ({} verts total)", plate_idx, num_plates, verts.len());
         loop {
-            let idx = task_rng().gen_range(0u, verts.len());
+            let idx = rng.gen_range(0u, verts.len());
 
             if plate_id_for_verts[idx] == -1 {
                 plate_id_for_verts[idx] = plate_idx as int;
@@ -156,7 +154,7 @@ fn random_partition(verts: &Vec<PlatePoint>,
         flood_fill(verts, &mut plate_id_for_verts, &mut plate_points);
     });
 
-    plate_points.iter().map(|points| Plate::from_points(points.clone())).collect()
+    plate_points.iter().map(|points| Plate::from_points(rng, points.clone())).collect()
 }
 
 pub struct PlateSimulation {
@@ -165,8 +163,9 @@ pub struct PlateSimulation {
 }
 
 impl PlateSimulation {
-    pub fn new(poly: &Polyhedron,
-               num_plates: uint) -> PlateSimulation {
+    pub fn new<R: Rng>(poly: &Polyhedron,
+                       num_plates: uint,
+                       rng: &mut R) -> PlateSimulation {
         if poly.faces.len() < num_plates {
             panic!("cannot split {} faces into {} plates", poly.faces.len(), num_plates);
         }
@@ -182,7 +181,7 @@ impl PlateSimulation {
             verts.push(PlatePoint::new(&vert.pos, nbr_indices));
         }
 
-        let plates = random_partition(&verts, num_plates);
+        let plates = random_partition(rng, &verts, num_plates);
         for plate in plates.iter() {
             for &vert_idx in plate.vertex_indices.iter() {
                 verts[vert_idx].speed = plate.move_speed;
@@ -191,7 +190,7 @@ impl PlateSimulation {
 
         PlateSimulation {
             verts: verts,
-            plates: plates,
+            plates: plates
         }
     }
 

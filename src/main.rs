@@ -11,6 +11,11 @@ extern crate render;
 extern crate device;
 extern crate core;
 
+use std::rand::{SeedableRng, XorShiftRng};
+use std::os;
+use std::str::from_str;
+use std::cmp::min;
+
 use gfx::{Device, DeviceHelper};
 use gfx::GlCommandBuffer;
 use glfw::Context;
@@ -30,6 +35,46 @@ mod plate_simulation;
 
 include!("macros.rs")
 
+struct CmdLineArgs {
+    rng_seed: [u32, ..4]
+}
+
+impl CmdLineArgs {
+    fn parse_rng_seed(arg: &str,
+                      seed: &mut [u32, ..4]) {
+        let split: Vec<&str> = arg.split_str(",").collect();
+
+        if split.len() > seed.len() {
+            println_err!("warning: excess RNG seed initializer elements: got {}, expected no more than {}",
+                         split.len(), seed.len());
+        }
+
+        for i in range(0u, min(seed.len(), split.len())) {
+            match from_str::<u32>(split[i].as_slice()) {
+                Some(val) => seed[i] = val,
+                None => {
+                    println_err!("warning: {} is not a valid 32-bit unsigned integer in: {}",
+                                 split[i], arg);
+                }
+            }
+        }
+    }
+
+    pub fn parse() -> CmdLineArgs {
+        let args = os::args();
+        let mut rng_seed: [u32, ..4] = [1, 2, 3, 4];
+
+        if args.len() > 1 {
+            CmdLineArgs::parse_rng_seed(args[1].as_slice(), &mut rng_seed);
+        }
+
+        CmdLineArgs {
+            rng_seed: rng_seed
+        }
+    }
+}
+
+
 struct GameState<'a> {
     wnd: &'a glfw::Window,
     dev: gfx::GlDevice,
@@ -43,7 +88,8 @@ struct GameState<'a> {
 }
 
 impl<'a> GameState<'a> {
-    fn new(wnd: &glfw::Window) -> GameState {
+    fn new(cmdline_args: &CmdLineArgs,
+           wnd: &'a glfw::Window) -> GameState<'a> {
         let (width, height) = wnd.get_size();
         let aspect_ratio = width as f32 / height as f32;
         let view_angle = cgmath::deg(45.0f32);
@@ -56,8 +102,9 @@ impl<'a> GameState<'a> {
         let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
         let renderer = dev.create_renderer();
 
+        let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed);
         let plate_sim_poly = polyhedron::make_sphere(2);
-        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 25u);
+        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 25u, &mut rng);
         plate_sim.simulate_plates(10u);
 
         let world_poly = polyhedron::make_sphere(4);
@@ -166,6 +213,8 @@ fn game_loop<'a>(game: &mut GameState<'a>,
 }
 
 fn main() {
+    let cmdline_args = CmdLineArgs::parse();
+
     let glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.set_error_callback(glfw::FAIL_ON_ERRORS);
 
@@ -181,6 +230,6 @@ fn main() {
     let (width, height) = wnd.get_framebuffer_size();
     let frame = gfx::Frame::new(width as u16, height as u16);
 
-    let mut state = GameState::new(&wnd);
+    let mut state = GameState::new(&cmdline_args, &wnd);
     game_loop(&mut state, &glfw, &events, &frame);
 }
