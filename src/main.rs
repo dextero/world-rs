@@ -57,7 +57,7 @@ impl<'a> GameState<'a> {
         let renderer = dev.create_renderer();
 
         let plate_sim_poly = polyhedron::make_sphere(2);
-        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 10u);
+        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 25u);
         plate_sim.simulate_plates(10u);
 
         let world_poly = polyhedron::make_sphere(4);
