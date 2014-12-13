@@ -63,13 +63,18 @@ impl<'a> GameState<'a> {
         let renderer = dev.create_renderer();
 
         let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed);
-        let plate_sim_poly = polyhedron::make_sphere(2);
-        let mut plate_sim = PlateSimulation::new(&plate_sim_poly, 25u, &mut rng);
-        plate_sim.simulate_plates(10u);
+        let plate_sim_poly = polyhedron::make_sphere(cmdline_args.plate_sim_detail_level);
+        let mut plate_sim = PlateSimulation::new(&plate_sim_poly,
+                                                 cmdline_args.plate_sim_plates,
+                                                 &mut rng);
+        plate_sim.simulate_plates(cmdline_args.plate_sim_steps);
 
-        let world_poly = polyhedron::make_sphere(4);
+        let world_poly = polyhedron::make_sphere(cmdline_args.world_detail_level);
         let mut world = World::new(world_poly);
-        world.apply_heights(&plate_sim);
+
+        time_it!("world.apply_heights", 0.0f64, {
+            world.apply_heights(&plate_sim);
+        });
 
         GameState {
             wnd: wnd,
@@ -130,7 +135,7 @@ impl<'a> GameState<'a> {
         while self.update_accumulator > UPDATE_STEP {
             self.update_accumulator -= UPDATE_STEP;
 
-            time_it!("update step", 0.02f64, {
+            time_it!("update step", 0.05f64, {
                 self.update_step(UPDATE_STEP);
             });
         }
@@ -142,7 +147,9 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  events: &std::comm::Receiver<(f64, glfw::WindowEvent)>,
                  frame: &gfx::Frame) {
     let mut ctx = gfx::batch::Context::new();
-    let batch = game.world.to_batch(&mut ctx, &mut game.dev);
+    let batch = time_it!("world.to_batch", 0.0f64, {
+                             game.world.to_batch(&mut ctx, &mut game.dev)
+                         });
 
     let clear_data = gfx::ClearData {
         color: [0.0, 0.0, 0.2, 1.0],
@@ -188,7 +195,9 @@ fn main() {
     glfw.window_hint(glfw::WindowHint::OpenglForwardCompat(true));
     glfw.window_hint(glfw::WindowHint::OpenglProfile(glfw::OpenGlProfileHint::Core));
 
-    let (wnd, events) = glfw.create_window(1000, 1000, "world", glfw::WindowMode::Windowed)
+    let (wnd, events) = glfw.create_window(cmdline_args.resolution[0],
+                                           cmdline_args.resolution[1],
+                                           "world", glfw::WindowMode::Windowed)
                             .expect("Failed to create GLFW window");
     wnd.make_current();
     wnd.set_key_polling(true);

@@ -45,12 +45,9 @@ fn get_min_max_length<Iter: Iterator<Vector3<f32>>>(iter: &mut Iter) -> (f32, f3
     let mut min_len_sq = iter.next().unwrap().length2();
     let mut max_len_sq = min_len_sq;
 
-    println!("initial = {}", min_len_sq);
-
     loop {
         match iter.next() {
             Some(v) => {
-                println!("next = {}", v.length2());
                 min_len_sq = min_len_sq.min(v.length2());
                 max_len_sq = max_len_sq.max(v.length2());
             },
@@ -74,8 +71,6 @@ impl World {
         let poly = &self.poly;
         let (min_h, max_h) = get_min_max_length(&mut self.poly.vertices.iter().map(|v| v.pos));
         let mut vertices = Vec::with_capacity(poly.faces.len() * 3u);
-
-        println!("min = {}, max = {}", min_h, max_h);
 
         for face_idx in range(0u, poly.faces.len()) {
             let face = &poly.faces[face_idx];
