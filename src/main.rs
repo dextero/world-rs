@@ -1,6 +1,8 @@
 #![feature(phase)]
 
 extern crate time;
+extern crate getopts;
+
 extern crate glfw;
 extern crate gfx;
 extern crate cgmath;
@@ -9,12 +11,9 @@ extern crate cgmath;
 extern crate gfx_macros;
 extern crate render;
 extern crate device;
-extern crate core;
 
 use std::rand::{SeedableRng, XorShiftRng};
 use std::os;
-use std::str::from_str;
-use std::cmp::min;
 
 use gfx::{Device, DeviceHelper};
 use gfx::GlCommandBuffer;
@@ -32,48 +31,9 @@ mod collisions;
 mod world;
 mod rendering;
 mod plate_simulation;
+mod cmdline;
 
 include!("macros.rs")
-
-struct CmdLineArgs {
-    rng_seed: [u32, ..4]
-}
-
-impl CmdLineArgs {
-    fn parse_rng_seed(arg: &str,
-                      seed: &mut [u32, ..4]) {
-        let split: Vec<&str> = arg.split_str(",").collect();
-
-        if split.len() > seed.len() {
-            println_err!("warning: excess RNG seed initializer elements: got {}, expected no more than {}",
-                         split.len(), seed.len());
-        }
-
-        for i in range(0u, min(seed.len(), split.len())) {
-            match from_str::<u32>(split[i].as_slice()) {
-                Some(val) => seed[i] = val,
-                None => {
-                    println_err!("warning: {} is not a valid 32-bit unsigned integer in: {}",
-                                 split[i], arg);
-                }
-            }
-        }
-    }
-
-    pub fn parse() -> CmdLineArgs {
-        let args = os::args();
-        let mut rng_seed: [u32, ..4] = [1, 2, 3, 4];
-
-        if args.len() > 1 {
-            CmdLineArgs::parse_rng_seed(args[1].as_slice(), &mut rng_seed);
-        }
-
-        CmdLineArgs {
-            rng_seed: rng_seed
-        }
-    }
-}
-
 
 struct GameState<'a> {
     wnd: &'a glfw::Window,
@@ -88,7 +48,7 @@ struct GameState<'a> {
 }
 
 impl<'a> GameState<'a> {
-    fn new(cmdline_args: &CmdLineArgs,
+    fn new(cmdline_args: &cmdline::Args,
            wnd: &'a glfw::Window) -> GameState<'a> {
         let (width, height) = wnd.get_size();
         let aspect_ratio = width as f32 / height as f32;
@@ -213,7 +173,13 @@ fn game_loop<'a>(game: &mut GameState<'a>,
 }
 
 fn main() {
-    let cmdline_args = CmdLineArgs::parse();
+    let cmdline_args = match cmdline::Args::parse() {
+        Ok(args) => args,
+        Err(exit_status) => {
+            os::set_exit_status(exit_status);
+            return;
+        }
+    };
 
     let glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.set_error_callback(glfw::FAIL_ON_ERRORS);

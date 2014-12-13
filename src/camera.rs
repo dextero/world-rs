@@ -5,7 +5,7 @@ extern crate glfw;
 
 use std::num::Float;
 use std::num::FloatMath;
-use core::f32::consts::{PI_2, FRAC_PI_2};
+use std::f32::consts::{PI_2, FRAC_PI_2};
 
 use cgmath::{Point3, Vector3, Matrix4};
 use glfw::Action;

@@ -2,7 +2,7 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use core::f32::consts::{PI_2, FRAC_PI_3};
+use std::f32::consts::{PI_2, FRAC_PI_3};
 use std::num::{Float, FloatMath};
 
 use cgmath::{EuclideanVector, Vector, Vector3, FixedArray};
