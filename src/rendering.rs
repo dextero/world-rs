@@ -3,6 +3,9 @@ extern crate gfx;
 #[phase(plugin)]
 extern crate gfx_macros;
 
+use std::f32::consts::{PI_2, FRAC_PI_3};
+use std::num::{Float};
+
 #[vertex_format]
 pub struct Vertex {
     #[name = "a_pos"]
@@ -69,4 +72,33 @@ void main() {
 }
 "
 };
+
+pub fn color_for_hue(hue: f32) -> [f32, ..4] {
+    let c = 0.5;
+    let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
+
+    let rgb = match hue {
+        0.0 ... 1.0 => [c, x, 0.0],
+        1.0 ... 2.0 => [x, c, 0.0],
+        2.0 ... 3.0 => [0.0, c, x],
+        3.0 ... 4.0 => [0.0, x, c],
+        4.0 ... 5.0 => [x, 0.0, c],
+        _           => [c, 0.0, x]
+    };
+
+    [rgb[0], rgb[1], rgb[2], 1.0]
+}
+
+pub fn color_by_height(height: f32, min_height: f32, max_height: f32) -> [f32, ..4] {
+    let diff = max_height - min_height;
+    let relative_height = (height - min_height) / diff;
+    let hue = ((FRAC_PI_3 * 4.0 - relative_height * PI_2) + PI_2) % PI_2;
+    color_for_hue(hue)
+}
+
+pub fn color_by_index(idx: uint,
+                      max_idx: uint) -> [f32, ..4] {
+    let hue = idx as f32 / max_idx as f32 * PI_2;
+    color_for_hue(hue)
+}
 

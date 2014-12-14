@@ -15,6 +15,7 @@ extern crate device;
 use std::rand::{SeedableRng, XorShiftRng};
 use std::os;
 
+use gfx::batch;
 use gfx::{Device, DeviceHelper};
 use gfx::GlCommandBuffer;
 use glfw::Context;
@@ -22,7 +23,7 @@ use cgmath::{Point3, Vector3, Matrix4, FixedArray, AffineMatrix3, Transform};
 
 use collisions::{intersecting_triangle_id, Ray};
 use world::World;
-use rendering::Uniforms;
+use rendering::{PolyhedronBatch, Uniforms};
 use plate_simulation::PlateSimulation;
 
 mod camera;
@@ -35,6 +36,11 @@ mod cmdline;
 
 include!("macros.rs")
 
+enum DisplayState {
+    World,
+    PlateSimBatch(uint)
+}
+
 struct GameState<'a> {
     wnd: &'a glfw::Window,
     dev: gfx::GlDevice,
@@ -43,8 +49,22 @@ struct GameState<'a> {
     camera: camera::Camera,
 
     update_accumulator: f32,
+    display_state: DisplayState,
 
-    world: World
+    plate_sim_batches: Vec<(PolyhedronBatch, batch::Context)>,
+    world: World,
+}
+
+fn world_from_plate_sim(sim: &PlateSimulation,
+                        detail_level: uint) -> World {
+    let mut world_poly = polyhedron::make_sphere(detail_level);
+    let mut world = World::new(world_poly);
+
+    time_it!("world.apply_heights", 0.0f64, {
+        world.apply_heights(sim);
+    });
+
+    world
 }
 
 impl<'a> GameState<'a> {
@@ -67,7 +87,18 @@ impl<'a> GameState<'a> {
         let mut plate_sim = PlateSimulation::new(&plate_sim_poly,
                                                  cmdline_args.plate_sim_plates,
                                                  &mut rng);
-        plate_sim.simulate_plates(cmdline_args.plate_sim_steps);
+
+        let mut plate_sim_batches = Vec::with_capacity(cmdline_args.plate_sim_steps + 1);
+        let mut ctx = batch::Context::new();
+        let sim_world = world_from_plate_sim(&plate_sim, cmdline_args.world_detail_level);
+        plate_sim_batches.push((sim_world.to_batch(&mut ctx, &mut dev), ctx));
+        for _ in range(0u, cmdline_args.plate_sim_steps) {
+            let mut ctx = batch::Context::new();
+            plate_sim.simulate_plates(1);
+
+            let world = world_from_plate_sim(&plate_sim, cmdline_args.world_detail_level);
+            plate_sim_batches.push((world.to_batch(&mut ctx, &mut dev), ctx));
+        }
 
         let world_poly = polyhedron::make_sphere(cmdline_args.world_detail_level);
         let mut world = World::new(world_poly);
@@ -88,7 +119,33 @@ impl<'a> GameState<'a> {
             },
             camera: camera::Camera::new(),
             update_accumulator: 0.0,
+            display_state: DisplayState::World,
+            plate_sim_batches: plate_sim_batches,
             world: world
+        }
+    }
+
+    fn toggle_display_state(&mut self,
+                            forward: bool) {
+        self.display_state = match self.display_state {
+            DisplayState::World => if forward {
+                DisplayState::PlateSimBatch(0)
+            } else {
+                DisplayState::PlateSimBatch(self.plate_sim_batches.len() - 1)
+            },
+            DisplayState::PlateSimBatch(idx) => {
+                if forward {
+                    if idx == self.plate_sim_batches.len() - 1 {
+                        DisplayState::World
+                    } else {
+                        DisplayState::PlateSimBatch(idx + 1)
+                    }
+                } else if idx == 0 {
+                    DisplayState::World
+                } else {
+                    DisplayState::PlateSimBatch(idx - 1)
+                }
+            }
         }
     }
 
@@ -109,6 +166,12 @@ impl<'a> GameState<'a> {
                     self.camera.handle_key_action(camera::CAMERA_ZOOM_IN, action),
                 glfw::Key::KpSubtract | glfw::Key::Minus =>
                     self.camera.handle_key_action(camera::CAMERA_ZOOM_OUT, action),
+                glfw::Key::Num0 =>
+                    self.display_state = DisplayState::World,
+                glfw::Key::Left =>
+                    self.toggle_display_state(false),
+                glfw::Key::Right =>
+                    self.toggle_display_state(true),
                 _ => {}
             },
             _ => {}
@@ -146,7 +209,7 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  glfw: &glfw::Glfw,
                  events: &std::comm::Receiver<(f64, glfw::WindowEvent)>,
                  frame: &gfx::Frame) {
-    let mut ctx = gfx::batch::Context::new();
+    let mut ctx = batch::Context::new();
     let batch = time_it!("world.to_batch", 0.0f64, {
                              game.world.to_batch(&mut ctx, &mut game.dev)
                          });
@@ -172,7 +235,16 @@ fn game_loop<'a>(game: &mut GameState<'a>,
 
         time_it!("render frame", 0.02f64, {
             game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
-            game.renderer.draw((&batch, &game.uniforms, &ctx), frame);
+
+            match game.display_state {
+                DisplayState::World =>
+                    game.renderer.draw((&batch, &game.uniforms, &ctx), frame),
+                DisplayState::PlateSimBatch(idx) => {
+                    let &(ref batch, ref ctx) = &game.plate_sim_batches[idx];
+                    game.renderer.draw((batch, &game.uniforms, ctx), frame);
+                }
+            };
+
             game.dev.submit(game.renderer.as_buffer());
             game.renderer.reset();
 

@@ -2,13 +2,17 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use std::num::FloatMath;
+use std::num::{Float, FloatMath};
 use std::rand::Rng;
 
 use time;
-use cgmath::{EuclideanVector, Vector, Vector3, Basis3, Rotation, Rotation3, Rad, rad};
+use cgmath::{EuclideanVector, Vector, Vector3, Basis3, Rotation, Rotation3, Rad, rad, FixedArray};
+use gfx::batch::Context;
+use gfx::{GlDevice, Device, DeviceHelper, ToSlice};
 
 use polyhedron::{Edge, Polyhedron};
+use rendering;
+use rendering::{PolyhedronBatch, Vertex, color_by_index};
 
 include!("macros.rs")
 
@@ -45,6 +49,15 @@ fn random_axis<R: Rng>(rng: &mut R) -> Vector3<f32> {
     Vector3::new(rng.gen_range(0.0001f32, 1.0),
                  rng.gen_range(0.0001f32, 1.0),
                  rng.gen_range(0.0001f32, 1.0)).normalize()
+}
+
+fn make_vertex(pos: &Vector3<f32>,
+               color: &[f32, ..4]) -> Vertex {
+    Vertex {
+        pos: *pos.as_fixed(),
+        color: *color,
+        id: -2
+    }
 }
 
 impl Plate {
@@ -158,8 +171,17 @@ fn random_partition<R: Rng>(rng: &mut R,
 }
 
 pub struct PlateSimulation {
+    initial_distance: f32,
     pub verts: Vec<PlatePoint>,
     plates: Vec<Plate>
+}
+
+fn get_edge_length(poly: &Polyhedron) -> f32 {
+    let edge = &poly.edges[0];
+    let verts = [&poly.vertices[edge.vertex_indices[0]],
+                 &poly.vertices[edge.vertex_indices[1]]];
+    let diff = verts[0].pos.sub(&verts[1].pos);
+    diff.length()
 }
 
 impl PlateSimulation {
@@ -189,6 +211,7 @@ impl PlateSimulation {
         }
 
         PlateSimulation {
+            initial_distance: get_edge_length(poly),
             verts: verts,
             plates: plates
         }
@@ -196,6 +219,7 @@ impl PlateSimulation {
 
     fn simulate_plates_step(&mut self) {
         const DOT_THRESHOLD: f32 = 0.5;
+        let initial_distance: f32 = self.initial_distance;
 
         for plate in self.plates.iter() {
             plate.simulate(&mut self.verts);
@@ -221,11 +245,12 @@ impl PlateSimulation {
             max_dist = max_dist.max(avg_dist);
         }
 
-        let diff = max_dist - min_dist;
-        let factor = diff * 0.2;
-        let speed_scale = |i| 1.0 + (avg_distances[i] - min_dist) * factor;
+        let speed_scale = |i| 1.0 - (avg_distances[i] / initial_distance);
 
         for i in range(0u, self.verts.len()) {
+            if i % 100u == 0 {
+                println!("speed was {}, * {}", self.verts[i].speed.s, speed_scale(i));
+            }
             self.verts[i].speed.s *= speed_scale(i);
         }
     }
@@ -238,6 +263,49 @@ impl PlateSimulation {
                 self.simulate_plates_step();
             });
         }
+    }
+
+    fn get_vertices(&self) -> Vec<Vertex> {
+        let mut vertices = Vec::with_capacity(self.verts.len() * 2 + 1);
+        vertices.push(make_vertex(&Vector3::new(0.0, 0.0, 0.0), &[0.0, 0.0, 0.0, 1.0]));
+
+        for plate_idx in range(0u, self.plates.len()) {
+            let plate = &self.plates[plate_idx];
+            let plate_color = color_by_index(plate_idx, self.plates.len());
+
+            for &vert_idx in plate.vertex_indices.iter() {
+                let v = &self.verts[vert_idx];
+                let rot: Basis3<f32> = Rotation3::from_axis_angle(&plate.move_axis, v.speed);
+
+                vertices.push(make_vertex(&v.pos, &plate_color));
+                vertices.push(make_vertex(&rot.rotate_vector(&v.pos), &plate_color));
+            }
+        }
+
+        vertices
+    }
+
+    pub fn to_batch(&self,
+                    ctx: &mut Context,
+                    dev: &mut GlDevice) -> PolyhedronBatch {
+        let vertices = self.get_vertices();
+        let mesh = dev.create_mesh(vertices.as_slice());
+
+        let mut indices: Vec<u32> = Vec::with_capacity(self.verts.len() * 4);
+        for i in range(0u32, self.verts.len() as u32) {
+            indices.push(0);
+            indices.push(i * 2 + 1);
+            indices.push(i * 2 + 1);
+            indices.push(i * 2 + 2);
+        }
+        let idx_slice = dev.create_buffer_static(indices.as_slice())
+                           .to_slice(gfx::PrimitiveType::Line);
+
+        let shader = dev.link_program(rendering::VS_SOURCE.clone(), rendering::FS_SOURCE.clone())
+                        .unwrap();
+        let state = gfx::DrawState::new().depth(gfx::state::Comparison::LessEqual, true);
+
+        ctx.make_batch(&shader, &mesh, idx_slice, &state).unwrap()
     }
 }
 

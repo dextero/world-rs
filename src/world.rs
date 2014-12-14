@@ -2,7 +2,6 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use std::f32::consts::{PI_2, FRAC_PI_3};
 use std::num::{Float, FloatMath};
 
 use cgmath::{EuclideanVector, Vector, Vector3, FixedArray};
@@ -11,34 +10,11 @@ use gfx::{GlDevice, Device, DeviceHelper, ToSlice};
 
 use polyhedron::{Polyhedron};
 use rendering;
-use rendering::{PolyhedronBatch, Vertex};
+use rendering::{PolyhedronBatch, Vertex, color_by_height};
 use plate_simulation::PlateSimulation;
 
 pub struct World {
     poly: Polyhedron
-}
-
-fn color_for_hue(hue: f32) -> [f32, ..4] {
-    let c = 0.5;
-    let x = c * (1.0 - (hue % 2.0 - 1.0).abs());
-
-    let rgb = match hue {
-        0.0 ... 1.0 => [c, x, 0.0],
-        1.0 ... 2.0 => [x, c, 0.0],
-        2.0 ... 3.0 => [0.0, c, x],
-        3.0 ... 4.0 => [0.0, x, c],
-        4.0 ... 5.0 => [x, 0.0, c],
-        _           => [c, 0.0, x]
-    };
-
-    [rgb[0], rgb[1], rgb[2], 1.0]
-}
-
-fn color_by_height(height: f32, min_height: f32, max_height: f32) -> [f32, ..4] {
-    let diff = max_height - min_height;
-    let relative_height = (height - min_height) / diff;
-    let hue = ((FRAC_PI_3 * 4.0 - relative_height * PI_2) + PI_2) % PI_2;
-    color_for_hue(hue)
 }
 
 fn get_min_max_length<Iter: Iterator<Vector3<f32>>>(iter: &mut Iter) -> (f32, f32) {
@@ -79,9 +55,7 @@ impl World {
                          &poly.vertices[face.vertex_indices[2]].pos];
 
             let mean_pos = verts[0].add(verts[1]).add(verts[2]).div_s(3.0);
-            //let face_col = color_for_pos(&mean_pos);
             let face_col = color_by_height(mean_pos.length(), min_h, max_h);
-            //let face_col = color_by_idx(self.verts_to_plates[face.vertex_indices[0]], self.plates.len()); // TODO
 
             for &v in verts.iter() {
                 vertices.push(Vertex {
