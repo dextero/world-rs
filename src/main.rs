@@ -1,4 +1,5 @@
 #![feature(phase)]
+#![feature(slicing_syntax)]
 
 extern crate time;
 extern crate getopts;

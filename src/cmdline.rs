@@ -7,6 +7,135 @@ use std::str::FromStr;
 
 include!("macros.rs")
 
+fn get_block(data: &[u8],
+             block_index: uint) -> u32 {
+      data[block_index * 4 + 0] as u32 << 24
+    | data[block_index * 4 + 1] as u32 << 16
+    | data[block_index * 4 + 2] as u32 << 8
+    | data[block_index * 4 + 3] as u32
+}
+
+fn rotl(num: u32,
+        by: uint) -> u32 {
+    num << by
+    | num >> (32 - by)
+}
+
+fn murmur_step(key1: &mut u32,
+               key2: u32,
+               c1: u32,
+               c2: u32,
+               hash1: &mut u32,
+               hash2: u32,
+               rot1: uint,
+               rot2: uint,
+               magic: u32) {
+    *key1 *= c1;
+    *key1 = rotl(*key1, rot1);
+    *key1 *= c2;
+
+    *hash1 ^= *key1;
+    *hash1 = rotl(*hash1, rot2);
+    *hash1 += hash2;
+    *hash1 = *hash1 * 5 + magic;
+}
+
+fn murmur_tail(tail: &[u8],
+               hash: &mut [u32, ..4],
+               c: &[u32, ..4]) {
+    let mut k: [u32, ..4] = [0, 0, 0, 0];
+
+    k[0] = if tail.len() >= 15 { tail[14] as u32 << 16 } else { 0 }
+         | if tail.len() >= 14 { tail[13] as u32 << 8  } else { 0 }
+         | if tail.len() >= 13 { tail[12] as u32 << 0  } else { 0 };
+    k[1] = if tail.len() >= 12 { tail[11] as u32 << 24 } else { 0 }
+         | if tail.len() >= 11 { tail[10] as u32 << 16 } else { 0 }
+         | if tail.len() >= 10 { tail[ 9] as u32 << 8  } else { 0 }
+         | if tail.len() >=  9 { tail[ 8] as u32 << 0  } else { 0 };
+    k[2] = if tail.len() >=  8 { tail[ 7] as u32 << 24 } else { 0 }
+         | if tail.len() >=  7 { tail[ 6] as u32 << 16 } else { 0 }
+         | if tail.len() >=  6 { tail[ 5] as u32 << 8  } else { 0 }
+         | if tail.len() >=  5 { tail[ 4] as u32 << 0  } else { 0 };
+    k[3] = if tail.len() >=  4 { tail[ 3] as u32 << 24 } else { 0 }
+         | if tail.len() >=  3 { tail[ 2] as u32 << 16 } else { 0 }
+         | if tail.len() >=  2 { tail[ 1] as u32 << 8  } else { 0 }
+         | if tail.len() >=  1 { tail[ 0] as u32 << 0  } else { 0 };
+
+    for i in range(0u, 4u) {
+        if k[i] != 0 {
+            k[i] *= c[i];
+            k[i] = rotl(k[i], 15 + i);
+            k[i] *= c[(i + 1) % 4];
+            hash[i] ^= k[i];
+        }
+    }
+}
+
+fn fmix(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x *= 0x85ebca6b;
+    x ^= x >> 13;
+    x *= 0xc2b2ae35;
+    x ^= x >> 16;
+
+    x
+}
+
+fn murmur_hash3(text: &[u8],
+                hash: &mut [u32, ..4]) {
+    let num_blocks = text.len() / 16u;
+
+    for i in range(0u, 4u) {
+        hash[i] = 0;
+    }
+
+    let c = [0x239b961bu32, 0xab0e9789u32, 0x38b34ae5u32, 0xa1e38b93u32];
+
+    for i in range(0u, num_blocks) {
+        let mut k = [get_block(text, i * 4 + 0),
+                     get_block(text, i * 4 + 1),
+                     get_block(text, i * 4 + 2),
+                     get_block(text, i * 4 + 3)];
+
+        let mut k_tmp: u32;
+        let mut h_tmp: u32;
+
+        k_tmp = k[1];
+        h_tmp = hash[1];
+        murmur_step(&mut k[0], k_tmp, c[0], c[1], &mut hash[0], h_tmp, 15, 19, 0x561ccd1b);
+        k_tmp = k[2];
+        h_tmp = hash[2];
+        murmur_step(&mut k[1], k_tmp, c[1], c[2], &mut hash[1], h_tmp, 16, 17, 0x0bcaa747);
+        k_tmp = k[3];
+        h_tmp = hash[3];
+        murmur_step(&mut k[2], k_tmp, c[2], c[3], &mut hash[2], h_tmp, 17, 15, 0x96cd1c35);
+        k_tmp = k[0];
+        h_tmp = hash[0];
+        murmur_step(&mut k[3], k_tmp, c[3], c[0], &mut hash[3], h_tmp, 18, 13, 0x32ac3b17);
+    }
+
+    let tail = text[num_blocks..];
+    murmur_tail(tail, hash, &c);
+
+    for i in range(0u, 4u) {
+        hash[i] ^= text.len() as u32;
+    }
+
+    hash[0] += hash[1] + hash[2] + hash[3];
+    hash[1] += hash[0];
+    hash[2] += hash[0];
+    hash[3] += hash[0];
+
+    for i in range(0u, 4u) {
+        hash[i] = fmix(hash[i]);
+    }
+
+    hash[0] += hash[1] + hash[2] + hash[3];
+    hash[1] += hash[0];
+    hash[2] += hash[0];
+    hash[3] += hash[0];
+}
+
 pub struct Args {
     pub rng_seed: [u32, ..4],
     pub resolution: [u32, ..2],
@@ -22,20 +151,6 @@ fn from_str_or_panic<T: FromStr>(text: &str) -> T {
         None => {
             panic_bt!("invalid value: {}, use -h for help", text);
         }
-    }
-}
-
-fn parse_rng_seed(arg: &str,
-                  seed: &mut [u32, ..4]) {
-    let split: Vec<&str> = arg.split_str(",").collect();
-
-    if split.len() > seed.len() {
-        panic_bt!("excess RNG seed initializer elements: got {}, expected no more than {}",
-                  split.len(), seed.len());
-    }
-
-    for i in range(0u, min(seed.len(), split.len())) {
-        seed[i] = from_str_or_panic(split[i]);
     }
 }
 
@@ -98,7 +213,7 @@ impl Args {
         };
 
         match matches.opt_str("s") {
-            Some(arg) => parse_rng_seed(arg.as_slice(), &mut ret.rng_seed),
+            Some(arg) => murmur_hash3(arg.as_slice().as_bytes(), &mut ret.rng_seed),
             None => {}
         }
 
