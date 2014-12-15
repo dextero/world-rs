@@ -2,7 +2,7 @@ extern crate cgmath;
 extern crate gfx;
 
 use std::vec::Vec;
-use std::num::{Float, FloatMath};
+use std::num::FloatMath;
 use std::rand::Rng;
 
 use time;

@@ -39,7 +39,8 @@ include!("macros.rs")
 
 enum DisplayState {
     World,
-    PlateSimBatch(uint)
+    PlateSimPoints,
+    PlateSimWorld,
 }
 
 struct GameState<'a> {
@@ -51,14 +52,18 @@ struct GameState<'a> {
 
     update_accumulator: f32,
     display_state: DisplayState,
+    display_idx: uint,
 
-    plate_sim_batches: Vec<(PolyhedronBatch, batch::Context)>,
+    plate_sim_point_batches: Vec<(PolyhedronBatch, batch::Context)>,
+    plate_sim_world_batches: Vec<(PolyhedronBatch, batch::Context)>,
+
     world: World,
+    world_batch: (PolyhedronBatch, batch::Context),
 }
 
 fn world_from_plate_sim(sim: &PlateSimulation,
                         detail_level: uint) -> World {
-    let mut world_poly = polyhedron::make_sphere(detail_level);
+    let world_poly = polyhedron::make_sphere(detail_level);
     let mut world = World::new(world_poly);
 
     time_it!("world.apply_heights", 0.0f64, {
@@ -66,6 +71,55 @@ fn world_from_plate_sim(sim: &PlateSimulation,
     });
 
     world
+}
+
+fn sim_to_point_world_batches(sim: &PlateSimulation,
+                              dev: &mut gfx::GlDevice,
+                              cmdline_args: &cmdline::Args)
+        -> ((PolyhedronBatch, batch::Context),
+            (PolyhedronBatch, batch::Context),
+            World) {
+    let mut point_ctx = batch::Context::new();
+    let mut world_ctx = batch::Context::new();
+
+    let mut world = world_from_plate_sim(sim, cmdline_args.world_detail_level);
+
+    time_it!("world.apply_heights", 0.0f64, {
+        world.apply_heights(sim);
+    });
+
+    ((sim.to_batch(&mut point_ctx, dev), point_ctx),
+     (world.to_batch(&mut world_ctx, dev), world_ctx),
+     world)
+}
+
+fn generate_world(cmdline_args: &cmdline::Args,
+                  dev: &mut gfx::GlDevice)
+        -> (Vec<(PolyhedronBatch, batch::Context)>,
+            Vec<(PolyhedronBatch, batch::Context)>,
+            World) {
+    let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed);
+    let plate_sim_poly = polyhedron::make_sphere(cmdline_args.plate_sim_detail_level);
+    let mut plate_sim = PlateSimulation::new(&plate_sim_poly,
+                                             cmdline_args.plate_sim_plates,
+                                             &mut rng);
+
+    let mut point_batches = Vec::with_capacity(cmdline_args.plate_sim_steps);
+    let mut world_batches = Vec::with_capacity(cmdline_args.plate_sim_steps);
+
+    for _ in range(0u, cmdline_args.plate_sim_steps) {
+        let (point_batch_ctx, world_batch_ctx, _) = sim_to_point_world_batches(&plate_sim, dev, cmdline_args);
+        point_batches.push(point_batch_ctx);
+        world_batches.push(world_batch_ctx);
+
+        plate_sim.simulate_plates(1);
+    }
+
+    let (point_batch_ctx, world_batch_ctx, world) = sim_to_point_world_batches(&plate_sim, dev, cmdline_args);
+    point_batches.push(point_batch_ctx);
+    world_batches.push(world_batch_ctx);
+
+    (point_batches, world_batches, world)
 }
 
 impl<'a> GameState<'a> {
@@ -83,30 +137,9 @@ impl<'a> GameState<'a> {
         let mut dev = gfx::GlDevice::new(|s| wnd.get_proc_address(s));
         let renderer = dev.create_renderer();
 
-        let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed);
-        let plate_sim_poly = polyhedron::make_sphere(cmdline_args.plate_sim_detail_level);
-        let mut plate_sim = PlateSimulation::new(&plate_sim_poly,
-                                                 cmdline_args.plate_sim_plates,
-                                                 &mut rng);
-
-        let mut plate_sim_batches = Vec::with_capacity(cmdline_args.plate_sim_steps + 1);
-        let mut ctx = batch::Context::new();
-        let sim_world = world_from_plate_sim(&plate_sim, cmdline_args.world_detail_level);
-        plate_sim_batches.push((sim_world.to_batch(&mut ctx, &mut dev), ctx));
-        for _ in range(0u, cmdline_args.plate_sim_steps) {
-            let mut ctx = batch::Context::new();
-            plate_sim.simulate_plates(1);
-
-            let world = world_from_plate_sim(&plate_sim, cmdline_args.world_detail_level);
-            plate_sim_batches.push((world.to_batch(&mut ctx, &mut dev), ctx));
-        }
-
-        let world_poly = polyhedron::make_sphere(cmdline_args.world_detail_level);
-        let mut world = World::new(world_poly);
-
-        time_it!("world.apply_heights", 0.0f64, {
-            world.apply_heights(&plate_sim);
-        });
+        let (point_batches, world_batches, world) = generate_world(cmdline_args, &mut dev);
+        let mut world_ctx = batch::Context::new();
+        let world_batch = world.to_batch(&mut world_ctx, &mut dev);
 
         GameState {
             wnd: wnd,
@@ -121,32 +154,30 @@ impl<'a> GameState<'a> {
             camera: camera::Camera::new(),
             update_accumulator: 0.0,
             display_state: DisplayState::World,
-            plate_sim_batches: plate_sim_batches,
-            world: world
+            display_idx: point_batches.len() - 1,
+            plate_sim_point_batches: point_batches,
+            plate_sim_world_batches: world_batches,
+            world: world,
+            world_batch: (world_batch, world_ctx),
         }
     }
 
-    fn toggle_display_state(&mut self,
-                            forward: bool) {
+    fn toggle_display_idx(&mut self,
+                          delta: int) {
+        let limit = self.plate_sim_world_batches.len();
+
+        self.display_idx = if delta > 0 {
+            (self.display_idx + delta as uint) % limit
+        } else {
+            (self.display_idx + (limit as int - delta) as uint) % limit
+        };
+    }
+
+    fn toggle_display_state(&mut self) {
         self.display_state = match self.display_state {
-            DisplayState::World => if forward {
-                DisplayState::PlateSimBatch(0)
-            } else {
-                DisplayState::PlateSimBatch(self.plate_sim_batches.len() - 1)
-            },
-            DisplayState::PlateSimBatch(idx) => {
-                if forward {
-                    if idx == self.plate_sim_batches.len() - 1 {
-                        DisplayState::World
-                    } else {
-                        DisplayState::PlateSimBatch(idx + 1)
-                    }
-                } else if idx == 0 {
-                    DisplayState::World
-                } else {
-                    DisplayState::PlateSimBatch(idx - 1)
-                }
-            }
+            DisplayState::World => DisplayState::PlateSimWorld,
+            DisplayState::PlateSimWorld => DisplayState::PlateSimPoints,
+            DisplayState::PlateSimPoints => DisplayState::World,
         }
     }
 
@@ -170,9 +201,11 @@ impl<'a> GameState<'a> {
                 glfw::Key::Num0 =>
                     self.display_state = DisplayState::World,
                 glfw::Key::Left =>
-                    self.toggle_display_state(false),
+                    self.toggle_display_idx(-1),
                 glfw::Key::Right =>
-                    self.toggle_display_state(true),
+                    self.toggle_display_idx(1),
+                glfw::Key::Space =>
+                    self.toggle_display_state(),
                 _ => {}
             },
             _ => {}
@@ -210,11 +243,6 @@ fn game_loop<'a>(game: &mut GameState<'a>,
                  glfw: &glfw::Glfw,
                  events: &std::comm::Receiver<(f64, glfw::WindowEvent)>,
                  frame: &gfx::Frame) {
-    let mut ctx = batch::Context::new();
-    let batch = time_it!("world.to_batch", 0.0f64, {
-                             game.world.to_batch(&mut ctx, &mut game.dev)
-                         });
-
     let clear_data = gfx::ClearData {
         color: [0.0, 0.0, 0.2, 1.0],
         depth: 1.0,
@@ -237,15 +265,13 @@ fn game_loop<'a>(game: &mut GameState<'a>,
         time_it!("render frame", 0.02f64, {
             game.renderer.clear(clear_data, gfx::COLOR | gfx::DEPTH, frame);
 
-            match game.display_state {
-                DisplayState::World =>
-                    game.renderer.draw((&batch, &game.uniforms, &ctx), frame),
-                DisplayState::PlateSimBatch(idx) => {
-                    let &(ref batch, ref ctx) = &game.plate_sim_batches[idx];
-                    game.renderer.draw((batch, &game.uniforms, ctx), frame);
-                }
+            let &(ref batch, ref ctx) = match game.display_state {
+                DisplayState::World          => &game.world_batch,
+                DisplayState::PlateSimWorld  => &game.plate_sim_world_batches[game.display_idx],
+                DisplayState::PlateSimPoints => &game.plate_sim_point_batches[game.display_idx],
             };
 
+            game.renderer.draw((batch, &game.uniforms, ctx), frame);
             game.dev.submit(game.renderer.as_buffer());
             game.renderer.reset();
 

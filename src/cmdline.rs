@@ -2,7 +2,6 @@ extern crate getopts;
 
 use getopts::{optopt,optflag,getopts,OptGroup};
 use std::os;
-use std::cmp::min;
 use std::str::FromStr;
 
 include!("macros.rs")
@@ -22,7 +21,6 @@ fn rotl(num: u32,
 }
 
 fn murmur_step(key1: &mut u32,
-               key2: u32,
                c1: u32,
                c2: u32,
                hash1: &mut u32,
@@ -97,21 +95,16 @@ fn murmur_hash3(text: &[u8],
                      get_block(text, i * 4 + 2),
                      get_block(text, i * 4 + 3)];
 
-        let mut k_tmp: u32;
         let mut h_tmp: u32;
 
-        k_tmp = k[1];
         h_tmp = hash[1];
-        murmur_step(&mut k[0], k_tmp, c[0], c[1], &mut hash[0], h_tmp, 15, 19, 0x561ccd1b);
-        k_tmp = k[2];
+        murmur_step(&mut k[0], c[0], c[1], &mut hash[0], h_tmp, 15, 19, 0x561ccd1b);
         h_tmp = hash[2];
-        murmur_step(&mut k[1], k_tmp, c[1], c[2], &mut hash[1], h_tmp, 16, 17, 0x0bcaa747);
-        k_tmp = k[3];
+        murmur_step(&mut k[1], c[1], c[2], &mut hash[1], h_tmp, 16, 17, 0x0bcaa747);
         h_tmp = hash[3];
-        murmur_step(&mut k[2], k_tmp, c[2], c[3], &mut hash[2], h_tmp, 17, 15, 0x96cd1c35);
-        k_tmp = k[0];
+        murmur_step(&mut k[2], c[2], c[3], &mut hash[2], h_tmp, 17, 15, 0x96cd1c35);
         h_tmp = hash[0];
-        murmur_step(&mut k[3], k_tmp, c[3], c[0], &mut hash[3], h_tmp, 18, 13, 0x32ac3b17);
+        murmur_step(&mut k[3], c[3], c[0], &mut hash[3], h_tmp, 18, 13, 0x32ac3b17);
     }
 
     let tail = text[num_blocks..];
