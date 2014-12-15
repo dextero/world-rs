@@ -169,7 +169,7 @@ impl<'a> GameState<'a> {
         self.display_idx = if delta > 0 {
             (self.display_idx + delta as uint) % limit
         } else {
-            (self.display_idx + (limit as int - delta) as uint) % limit
+            (self.display_idx + (limit as int + delta) as uint) % limit
         };
     }
 
@@ -183,28 +183,28 @@ impl<'a> GameState<'a> {
 
     pub fn handle_event(&mut self, evt: &glfw::WindowEvent) {
         match *evt {
-            glfw::WindowEvent::Key(key, _, action, _) => match key {
-                glfw::Key::Escape =>
+            glfw::WindowEvent::Key(key, _, action, _) => match (key, action) {
+                (glfw::Key::Escape, _) =>
                     self.wnd.set_should_close(true),
-                glfw::Key::A =>
+                (glfw::Key::A, _) =>
                     self.camera.handle_key_action(camera::CAMERA_LEFT, action),
-                glfw::Key::D =>
-                    self.camera.handle_key_action(camera::CAMERA_RIGHT, action),
-                glfw::Key::W =>
-                    self.camera.handle_key_action(camera::CAMERA_UP, action),
-                glfw::Key::S =>
-                    self.camera.handle_key_action(camera::CAMERA_DOWN, action),
-                glfw::Key::KpAdd | glfw::Key::Equal =>
-                    self.camera.handle_key_action(camera::CAMERA_ZOOM_IN, action),
-                glfw::Key::KpSubtract | glfw::Key::Minus =>
-                    self.camera.handle_key_action(camera::CAMERA_ZOOM_OUT, action),
-                glfw::Key::Num0 =>
-                    self.display_state = DisplayState::World,
-                glfw::Key::Left =>
-                    self.toggle_display_idx(-1),
-                glfw::Key::Right =>
-                    self.toggle_display_idx(1),
-                glfw::Key::Space =>
+                (glfw::Key::D, _) =>
+                     self.camera.handle_key_action(camera::CAMERA_RIGHT, action),
+                (glfw::Key::W, _) =>
+                     self.camera.handle_key_action(camera::CAMERA_UP, action),
+                (glfw::Key::S, _) =>
+                     self.camera.handle_key_action(camera::CAMERA_DOWN, action),
+                (glfw::Key::KpAdd, _) | (glfw::Key::Equal, _) =>
+                     self.camera.handle_key_action(camera::CAMERA_ZOOM_IN, action),
+                (glfw::Key::KpSubtract, _) | (glfw::Key::Minus, _) =>
+                     self.camera.handle_key_action(camera::CAMERA_ZOOM_OUT, action),
+                (glfw::Key::Num0, glfw::Action::Release) =>
+                     self.display_state = DisplayState::World,
+                (glfw::Key::Left, _) =>
+                     self.toggle_display_idx(-1),
+                (glfw::Key::Right, _) =>
+                     self.toggle_display_idx(1),
+                (glfw::Key::Space, glfw::Action::Press) =>
                     self.toggle_display_state(),
                 _ => {}
             },
