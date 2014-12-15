@@ -124,7 +124,7 @@ fn flood_fill(verts: &Vec<PlatePoint>,
     let mut frontier_points = plate_points.clone();
 
     while filled_points < verts.len() {
-        println!("{} points to go", verts.len() - filled_points);
+        //println!("{} points to go", verts.len() - filled_points);
 
         for plate_idx in range(0u, plate_points.len()) {
             let mut new_frontier = Vec::new();
@@ -147,7 +147,7 @@ fn random_partition<R: Rng>(rng: &mut R,
     let mut plate_points = Vec::with_capacity(num_plates);
 
     for plate_idx in range(0u, num_plates) {
-        println!("finding origin of plate {}/{} ({} verts total)", plate_idx, num_plates, verts.len());
+        //println!("finding origin of plate {}/{} ({} verts total)", plate_idx, num_plates, verts.len());
         loop {
             let idx = rng.gen_range(0u, verts.len());
 
@@ -248,15 +248,12 @@ impl PlateSimulation {
         let speed_scale = |i| 1.0 - (avg_distances[i] / initial_distance);
 
         for i in range(0u, self.verts.len()) {
-            if i % 100u == 0 {
-                println!("speed was {}, * {}", self.verts[i].speed.s, speed_scale(i));
-            }
             self.verts[i].speed.s *= speed_scale(i);
         }
     }
 
     pub fn simulate_plates(&mut self, steps: uint) {
-        println!("simulating {} tectonic plate steps", steps);
+        //println!("simulating {} tectonic plate steps", steps);
 
         for _ in range(0u, steps) {
             time_it!("step", 1.0f64, {

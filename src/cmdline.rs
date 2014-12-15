@@ -2,6 +2,7 @@ extern crate getopts;
 
 use getopts::{optopt,optflag,getopts,OptGroup};
 use std::os;
+use std::fmt;
 use std::str::FromStr;
 
 include!("macros.rs")
@@ -130,12 +131,26 @@ fn murmur_hash3(text: &[u8],
 }
 
 pub struct Args {
-    pub rng_seed: [u32, ..4],
+    pub rng_seed: String,
+    pub rng_seed_hash: [u32, ..4],
     pub resolution: [u32, ..2],
     pub world_detail_level: uint,
     pub plate_sim_detail_level: uint,
     pub plate_sim_steps: uint,
     pub plate_sim_plates: uint,
+}
+
+impl fmt::Show for Args {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(writeln!(f, "Configuration:"));
+        try!(writeln!(f, "- rng_seed = {}", self.rng_seed));
+        try!(writeln!(f, "- rng_seed_hash = {}", self.rng_seed_hash));
+        try!(writeln!(f, "- resolution = {} x {}", self.resolution[0], self.resolution[1]));
+        try!(writeln!(f, "- world_detail_level = {}", self.world_detail_level));
+        try!(writeln!(f, "- plate_sim_detail_level = {}", self.plate_sim_detail_level));
+        try!(writeln!(f, "- plate_sim_steps = {}", self.plate_sim_steps));
+        writeln!(f, "- plate_sim_plates = {}", self.plate_sim_plates)
+    }
 }
 
 fn from_str_or_panic<T: FromStr>(text: &str) -> T {
@@ -197,7 +212,8 @@ impl Args {
         }
 
         let mut ret: Args = Args {
-            rng_seed: [1, 2, 3, 4],
+            rng_seed: String::from_str("asd"),
+            rng_seed_hash: [1, 2, 3, 4],
             resolution: [1000, 1000],
             world_detail_level: 4,
             plate_sim_detail_level: 2,
@@ -206,9 +222,10 @@ impl Args {
         };
 
         match matches.opt_str("s") {
-            Some(arg) => murmur_hash3(arg.as_slice().as_bytes(), &mut ret.rng_seed),
+            Some(arg) => ret.rng_seed = arg,
             None => {}
         }
+        murmur_hash3(ret.rng_seed.as_slice().as_bytes(), &mut ret.rng_seed_hash);
 
         match matches.opt_str("r") {
             Some(arg) => parse_resolution(arg.as_slice(), &mut ret.resolution),

@@ -66,7 +66,7 @@ fn world_from_plate_sim(sim: &PlateSimulation,
     let world_poly = polyhedron::make_sphere(detail_level);
     let mut world = World::new(world_poly);
 
-    time_it!("world.apply_heights", 0.0f64, {
+    time_it!("world.apply_heights", 0.5f64, {
         world.apply_heights(sim);
     });
 
@@ -81,12 +81,7 @@ fn sim_to_point_world_batches(sim: &PlateSimulation,
             World) {
     let mut point_ctx = batch::Context::new();
     let mut world_ctx = batch::Context::new();
-
-    let mut world = world_from_plate_sim(sim, cmdline_args.world_detail_level);
-
-    time_it!("world.apply_heights", 0.0f64, {
-        world.apply_heights(sim);
-    });
+    let world = world_from_plate_sim(sim, cmdline_args.world_detail_level);
 
     ((sim.to_batch(&mut point_ctx, dev), point_ctx),
      (world.to_batch(&mut world_ctx, dev), world_ctx),
@@ -98,7 +93,7 @@ fn generate_world(cmdline_args: &cmdline::Args,
         -> (Vec<(PolyhedronBatch, batch::Context)>,
             Vec<(PolyhedronBatch, batch::Context)>,
             World) {
-    let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed);
+    let mut rng: XorShiftRng = SeedableRng::from_seed(cmdline_args.rng_seed_hash);
     let plate_sim_poly = polyhedron::make_sphere(cmdline_args.plate_sim_detail_level);
     let mut plate_sim = PlateSimulation::new(&plate_sim_poly,
                                              cmdline_args.plate_sim_plates,
@@ -288,6 +283,8 @@ fn main() {
             return;
         }
     };
+
+    println!("{}", cmdline_args);
 
     let glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.set_error_callback(glfw::FAIL_ON_ERRORS);

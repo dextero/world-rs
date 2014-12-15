@@ -120,7 +120,7 @@ impl World {
 
         for i in range(0u, self.poly.vertices.len()) {
             let v = &mut self.poly.vertices[i].pos;
-            *v = v.mul_s(scale(i));
+            *v = v.normalize().mul_s(scale(i));
         }
     }
 }
